@@ -85,6 +85,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         HookInstaller.installIfNeeded()
         NSApplication.shared.setActivationPolicy(.accessory)
 
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            Task { @MainActor in
+                AccessibilityPermissionStore.shared.refresh()
+            }
+        }
+
         windowManager = WindowManager()
         appLogger.info("Creating initial notch window")
         _ = windowManager?.setupNotchWindow()

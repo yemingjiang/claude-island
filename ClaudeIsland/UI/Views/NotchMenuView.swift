@@ -85,15 +85,6 @@ struct NotchMenuView: View {
             // About
             UpdateRow(updateManager: updateManager)
 
-            MenuRow(
-                icon: "star",
-                label: "Star on GitHub"
-            ) {
-                if let url = URL(string: "https://github.com/farouqaldori/claude-island") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-
             Divider()
                 .background(Color.white.opacity(0.08))
                 .padding(.vertical, 4)
@@ -143,6 +134,11 @@ struct UpdateRow: View {
         return "v\(version) (\(build))"
     }
 
+    private var shortAppVersion: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        return "v\(version)"
+    }
+
     var body: some View {
         Button {
             handleTap()
@@ -150,7 +146,7 @@ struct UpdateRow: View {
             HStack(spacing: 10) {
                 // Icon
                 ZStack {
-                    if case .installing = updateManager.state {
+                    if case .checking = updateManager.state {
                         Image(systemName: "gear")
                             .font(.system(size: 12))
                             .foregroundColor(TerminalColors.blue)
@@ -209,20 +205,15 @@ struct UpdateRow: View {
                     .foregroundColor(TerminalColors.green)
             }
 
-        case .checking, .installing:
+        case .checking:
             ProgressView()
                 .scaleEffect(0.5)
                 .frame(width: 12, height: 12)
 
         case .found(let version, _):
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(TerminalColors.green)
-                    .frame(width: 6, height: 6)
-                Text("v\(version)")
-                    .font(.system(size: 11))
-                    .foregroundColor(TerminalColors.green)
-            }
+            Text("\(shortAppVersion) -> v\(version)")
+                .font(.system(size: 11))
+                .foregroundColor(TerminalColors.green)
 
         case .downloading(let progress):
             HStack(spacing: 8) {
@@ -247,14 +238,14 @@ struct UpdateRow: View {
             }
 
         case .readyToInstall(let version):
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(TerminalColors.green)
-                    .frame(width: 6, height: 6)
-                Text("v\(version)")
-                    .font(.system(size: 11))
-                    .foregroundColor(TerminalColors.green)
-            }
+            Text("\(shortAppVersion) -> v\(version)")
+                .font(.system(size: 11))
+                .foregroundColor(TerminalColors.green)
+
+        case .installing:
+            ProgressView()
+                .scaleEffect(0.5)
+                .frame(width: 12, height: 12)
 
         case .error:
             Text("Retry")
@@ -274,13 +265,13 @@ struct UpdateRow: View {
         case .upToDate:
             return "checkmark.circle.fill"
         case .found:
-            return "arrow.down.circle.fill"
+            return "arrow.triangle.2.circlepath.circle.fill"
         case .downloading:
             return "arrow.down.circle"
         case .extracting:
             return "doc.zipper"
         case .readyToInstall:
-            return "checkmark.circle.fill"
+            return "arrow.triangle.2.circlepath.circle.fill"
         case .installing:
             return "gear"
         case .error:
@@ -293,7 +284,7 @@ struct UpdateRow: View {
         case .idle:
             return .white.opacity(isHovered ? 1.0 : 0.7)
         case .checking:
-            return .white.opacity(0.7)
+            return TerminalColors.blue
         case .upToDate:
             return TerminalColors.green
         case .found, .readyToInstall:
@@ -318,13 +309,13 @@ struct UpdateRow: View {
         case .upToDate:
             return "Check for Updates"
         case .found:
-            return "Download Update"
+            return "Update Available"
         case .downloading:
             return "Downloading..."
         case .extracting:
             return "Extracting..."
         case .readyToInstall:
-            return "Install & Relaunch"
+            return "Update Available"
         case .installing:
             return "Installing..."
         case .error:
@@ -347,9 +338,9 @@ struct UpdateRow: View {
 
     private var isInteractive: Bool {
         switch updateManager.state {
-        case .idle, .upToDate, .found, .readyToInstall, .error:
+        case .idle, .upToDate, .error:
             return true
-        case .checking, .downloading, .extracting, .installing:
+        case .checking, .found, .downloading, .extracting, .readyToInstall, .installing:
             return false
         }
     }
@@ -360,10 +351,6 @@ struct UpdateRow: View {
         switch updateManager.state {
         case .idle, .upToDate, .error:
             updateManager.checkForUpdates()
-        case .found:
-            updateManager.downloadAndInstall()
-        case .readyToInstall:
-            updateManager.installAndRelaunch()
         default:
             break
         }
@@ -374,7 +361,7 @@ struct UpdateRow: View {
 
 struct AccessibilityRow: View {
     @State private var isHovered = false
-    @State private var isEnabled = AXIsProcessTrusted()
+    @ObservedObject private var permissionStore = AccessibilityPermissionStore.shared
 
     var body: some View {
         HStack(spacing: 10) {
@@ -389,7 +376,7 @@ struct AccessibilityRow: View {
 
             Spacer()
 
-            if isEnabled {
+            if permissionStore.isEnabled {
                 Circle()
                     .fill(TerminalColors.green)
                     .frame(width: 6, height: 6)
@@ -419,9 +406,9 @@ struct AccessibilityRow: View {
                 .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
         )
         .onHover { isHovered = $0 }
-        .onAppear(perform: refreshPermissionStatus)
+        .onAppear(perform: permissionStore.refresh)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            refreshPermissionStatus()
+            permissionStore.refresh()
         }
     }
 
@@ -433,10 +420,6 @@ struct AccessibilityRow: View {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
-    }
-
-    private func refreshPermissionStatus() {
-        isEnabled = AXIsProcessTrusted()
     }
 }
 

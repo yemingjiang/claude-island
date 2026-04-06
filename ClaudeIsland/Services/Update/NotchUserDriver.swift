@@ -44,10 +44,6 @@ class UpdateManager: NSObject, ObservableObject {
     private var expectedBytes: Int64 = 0
     private var currentVersion: String = ""
 
-    // Callbacks from Sparkle
-    private var installHandler: ((SPUUserUpdateChoice) -> Void)?
-    private var cancellationHandler: (() -> Void)?
-
     override init() {
         super.init()
     }
@@ -63,34 +59,10 @@ class UpdateManager: NSObject, ObservableObject {
         }
     }
 
-    func downloadAndInstall() {
-        installHandler?(.install)
-    }
-
-    func installAndRelaunch() {
-        installHandler?(.install)
-    }
-
-    func skipUpdate() {
-        installHandler?(.skip)
-        state = .idle
-    }
-
-    func dismissUpdate() {
-        installHandler?(.dismiss)
-        state = .idle
-    }
-
-    func cancelDownload() {
-        cancellationHandler?()
-        state = .idle
-    }
-
     // MARK: - Internal state updates (called by NotchUserDriver)
 
-    func updateFound(version: String, releaseNotes: String?, installHandler: @escaping (SPUUserUpdateChoice) -> Void) {
+    func updateFound(version: String, releaseNotes: String?) {
         self.currentVersion = version
-        self.installHandler = installHandler
         self.state = .found(version: version, releaseNotes: releaseNotes)
         // Only show the dot if user hasn't seen it this session
         if !hasSeenUpdateThisSession {
@@ -104,10 +76,9 @@ class UpdateManager: NSObject, ObservableObject {
     }
 
     func downloadStarted(cancellation: @escaping () -> Void) {
-        self.cancellationHandler = cancellation
+        cancellation()
         self.downloadedBytes = 0
         self.expectedBytes = 0
-        self.state = .downloading(progress: 0)
     }
 
     func downloadExpectedLength(_ length: UInt64) {
@@ -129,8 +100,7 @@ class UpdateManager: NSObject, ObservableObject {
     }
 
     func readyToInstall(installHandler: @escaping (SPUUserUpdateChoice) -> Void) {
-        self.installHandler = installHandler
-        self.state = .readyToInstall(version: currentVersion)
+        installHandler(.dismiss)
     }
 
     func installing() {
@@ -162,8 +132,6 @@ class UpdateManager: NSObject, ObservableObject {
             return
         }
         self.state = .idle
-        self.installHandler = nil
-        self.cancellationHandler = nil
     }
 }
 
@@ -190,8 +158,9 @@ class NotchUserDriver: NSObject, SPUUserDriver {
         let releaseNotes = appcastItem.itemDescription
 
         Task { @MainActor in
-            UpdateManager.shared.updateFound(version: version, releaseNotes: releaseNotes, installHandler: reply)
+            UpdateManager.shared.updateFound(version: version, releaseNotes: releaseNotes)
         }
+        reply(.dismiss)
     }
 
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {
