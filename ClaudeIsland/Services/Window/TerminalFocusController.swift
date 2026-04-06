@@ -20,6 +20,7 @@ actor TerminalFocusController {
             workingDirectory: nil,
             windowHint: nil,
             isInTmux: nil,
+            tty: nil,
             ghosttyWindowId: nil,
             ghosttyTabId: nil
         )
@@ -30,6 +31,7 @@ actor TerminalFocusController {
         workingDirectory: String?,
         windowHint: String?,
         isInTmux: Bool?,
+        tty: String?,
         ghosttyWindowId: String?,
         ghosttyTabId: String?
     ) async -> Bool {
@@ -41,6 +43,7 @@ actor TerminalFocusController {
                 claudePid: claudePid,
                 workingDirectory: workingDirectory,
                 windowHint: windowHint,
+                tty: tty,
                 ghosttyWindowId: ghosttyWindowId,
                 ghosttyTabId: ghosttyTabId,
                 tree: tree
@@ -52,6 +55,7 @@ actor TerminalFocusController {
                 pid: terminalPid,
                 workingDirectory: workingDirectory,
                 titleHints: titleHints(workingDirectory: workingDirectory, windowHint: windowHint),
+                tty: tty,
                 ghosttyWindowId: ghosttyWindowId,
                 ghosttyTabId: ghosttyTabId
             )
@@ -61,6 +65,7 @@ actor TerminalFocusController {
             return await focusWindow(
                 forWorkingDir: workingDirectory,
                 windowHint: windowHint,
+                tty: tty,
                 ghosttyWindowId: ghosttyWindowId,
                 ghosttyTabId: ghosttyTabId
             )
@@ -70,22 +75,24 @@ actor TerminalFocusController {
     }
 
     func focusWindow(forWorkingDirectory workingDirectory: String) async -> Bool {
-        await focusWindow(forWorkingDirectory: workingDirectory, windowHint: nil, ghosttyWindowId: nil, ghosttyTabId: nil)
+        await focusWindow(forWorkingDirectory: workingDirectory, windowHint: nil, tty: nil, ghosttyWindowId: nil, ghosttyTabId: nil)
     }
 
     func focusWindow(forWorkingDirectory workingDirectory: String, windowHint: String?) async -> Bool {
-        await focusWindow(forWorkingDirectory: workingDirectory, windowHint: windowHint, ghosttyWindowId: nil, ghosttyTabId: nil)
+        await focusWindow(forWorkingDirectory: workingDirectory, windowHint: windowHint, tty: nil, ghosttyWindowId: nil, ghosttyTabId: nil)
     }
 
     func focusWindow(
         forWorkingDirectory workingDirectory: String,
         windowHint: String?,
+        tty: String?,
         ghosttyWindowId: String?,
         ghosttyTabId: String?
     ) async -> Bool {
         await focusWindow(
             forWorkingDir: workingDirectory,
             windowHint: windowHint,
+            tty: tty,
             ghosttyWindowId: ghosttyWindowId,
             ghosttyTabId: ghosttyTabId
         )
@@ -95,6 +102,7 @@ actor TerminalFocusController {
         claudePid: Int,
         workingDirectory: String?,
         windowHint: String?,
+        tty: String?,
         ghosttyWindowId: String?,
         ghosttyTabId: String?,
         tree: [Int: ProcessInfo]
@@ -111,6 +119,7 @@ actor TerminalFocusController {
                 pid: terminalPid,
                 workingDirectory: fallbackWorkingDirectory,
                 titleHints: titleHints(workingDirectory: fallbackWorkingDirectory, windowHint: windowHint),
+                tty: tty,
                 ghosttyWindowId: ghosttyWindowId,
                 ghosttyTabId: ghosttyTabId
             )
@@ -122,6 +131,7 @@ actor TerminalFocusController {
     private func focusWindow(
         forWorkingDir workingDir: String,
         windowHint: String?,
+        tty: String?,
         ghosttyWindowId: String?,
         ghosttyTabId: String?
     ) async -> Bool {
@@ -139,6 +149,7 @@ actor TerminalFocusController {
         return await WindowFocuser.shared.focusPreferredTerminalApplication(
             workingDirectory: workingDir,
             titleHints: titleHints(workingDirectory: workingDir, windowHint: windowHint),
+            tty: tty,
             ghosttyWindowId: ghosttyWindowId,
             ghosttyTabId: ghosttyTabId
         )
@@ -214,6 +225,7 @@ actor TerminalFocusController {
                                 pid: terminalPid,
                                 workingDirectory: workingDir,
                                 titleHints: titleHints(workingDirectory: workingDir, windowHint: windowHint),
+                                tty: nil,
                                 ghosttyWindowId: nil,
                                 ghosttyTabId: nil
                             )

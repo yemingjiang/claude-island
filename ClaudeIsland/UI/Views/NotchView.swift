@@ -173,6 +173,7 @@ struct NotchView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             sessionMonitor.startMonitoring()
+            viewModel.updateInstancesLayout(using: sessionMonitor.instances)
             // On non-notched devices, keep visible so users have a target to interact with
             if !viewModel.hasPhysicalNotch {
                 isVisible = true
@@ -185,6 +186,7 @@ struct NotchView: View {
             handlePendingSessionsChange(sessions)
         }
         .onChange(of: sessionMonitor.instances) { _, instances in
+            viewModel.updateInstancesLayout(using: instances)
             handleProcessingChange()
             handleWaitingForInputChange(instances)
         }

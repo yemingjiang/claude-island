@@ -42,7 +42,17 @@ class NotchViewModel: ObservableObject {
     private static let menuBaseHeight: CGFloat = 460
     private static let closedCapsuleHeight: CGFloat = 28
     private static let instancesPanelWidth: CGFloat = 320
-    private static let instancesPanelHeight: CGFloat = 210
+    private static let emptyInstancesPanelHeight: CGFloat = 156
+    private static let minimumInstancesPanelHeight: CGFloat = 320
+    private static let instancesBaseChromeHeight: CGFloat = 132
+    private static let notificationsSectionHeaderHeight: CGFloat = 58
+    private static let emptyNotificationsHeight: CGFloat = 52
+    private static let notificationRowHeight: CGFloat = 52
+    private static let notificationRowSpacing: CGFloat = 4
+    private static let activeSessionsSectionHeaderHeight: CGFloat = 58
+    private static let activeSessionCardHeight: CGFloat = 106
+    private static let activeSessionCardSpacing: CGFloat = 8
+    private static let maxVisibleSessionsWithoutScroll = 6
     private static let regularPanelWidth: CGFloat = 400
 
     // MARK: - Published State
@@ -51,6 +61,7 @@ class NotchViewModel: ObservableObject {
     @Published var openReason: NotchOpenReason = .unknown
     @Published var contentType: NotchContentType = .instances
     @Published var isHovering: Bool = false
+    @Published private var instancesPanelHeight: CGFloat = 320
 
     // MARK: - Dependencies
 
@@ -88,7 +99,7 @@ class NotchViewModel: ObservableObject {
         case .instances:
             return CGSize(
                 width: min(screenRect.width * 0.28, Self.instancesPanelWidth),
-                height: Self.instancesPanelHeight
+                height: min(screenRect.height * 0.92, instancesPanelHeight)
             )
         }
     }
@@ -276,6 +287,42 @@ class NotchViewModel: ObservableObject {
     func notchUnpop() {
         guard status == .popping else { return }
         status = .closed
+    }
+
+    func updateInstancesLayout(using sessions: [SessionState]) {
+        let sessionCount = sessions.count
+
+        guard sessionCount > 0 else {
+            instancesPanelHeight = Self.emptyInstancesPanelHeight
+            return
+        }
+
+        let notificationCount = sessions.filter {
+            $0.phase == .processing ||
+            $0.phase == .compacting ||
+            $0.phase.isWaitingForApproval ||
+            $0.phase == .waitingForInput
+        }.count
+
+        let visibleSessionCount = min(sessionCount, Self.maxVisibleSessionsWithoutScroll)
+
+        let notificationsHeight: CGFloat
+        if notificationCount == 0 {
+            notificationsHeight = Self.notificationsSectionHeaderHeight + Self.emptyNotificationsHeight
+        } else {
+            notificationsHeight =
+                Self.notificationsSectionHeaderHeight +
+                CGFloat(notificationCount) * Self.notificationRowHeight +
+                CGFloat(max(0, notificationCount - 1)) * Self.notificationRowSpacing
+        }
+
+        let activeSessionsHeight =
+            Self.activeSessionsSectionHeaderHeight +
+            CGFloat(visibleSessionCount) * Self.activeSessionCardHeight +
+            CGFloat(max(0, visibleSessionCount - 1)) * Self.activeSessionCardSpacing
+
+        let desiredHeight = Self.instancesBaseChromeHeight + notificationsHeight + activeSessionsHeight
+        instancesPanelHeight = max(Self.minimumInstancesPanelHeight, desiredHeight)
     }
 
     func toggleMenu() {

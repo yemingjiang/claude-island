@@ -452,6 +452,7 @@ struct ChatView: View {
                     workingDirectory: session.cwd,
                     windowHint: session.windowHint,
                     isInTmux: session.isInTmux,
+                    tty: session.tty,
                     ghosttyWindowId: session.ghosttyWindowId,
                     ghosttyTabId: session.ghosttyTabId
                 )
@@ -459,6 +460,7 @@ struct ChatView: View {
                 _ = await TerminalFocusController.shared.focusWindow(
                     forWorkingDirectory: session.cwd,
                     windowHint: session.windowHint,
+                    tty: session.tty,
                     ghosttyWindowId: session.ghosttyWindowId,
                     ghosttyTabId: session.ghosttyTabId
                 )

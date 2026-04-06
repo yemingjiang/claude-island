@@ -66,6 +66,15 @@ struct ClaudeInstancesView: View {
         }
     }
 
+    private var notificationSessions: [SessionState] {
+        sortedInstances.filter {
+            $0.phase == SessionPhase.processing ||
+            $0.phase == SessionPhase.compacting ||
+            $0.phase.isWaitingForApproval ||
+            $0.phase == SessionPhase.waitingForInput
+        }
+    }
+
     /// Lower number = higher priority
     /// Approval requests share priority with processing to maintain stable ordering
     private func phasePriority(_ phase: SessionPhase) -> Int {
@@ -78,20 +87,60 @@ struct ClaudeInstancesView: View {
 
     private var instancesList: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: 2) {
-                ForEach(sortedInstances) { session in
-                    InstanceRow(
-                        session: session,
-                        onFocus: { focusSession(session) },
-                        onChat: { openChat(session) },
-                        onArchive: { archiveSession(session) },
-                        onApprove: { approveSession(session) },
-                        onReject: { rejectSession(session) }
+            VStack(alignment: .leading, spacing: 14) {
+                SessionOverviewBar(sessions: sortedInstances)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionHeader(
+                        title: "Notifications",
+                        subtitle: "Sessions that are running, waiting, or need attention"
                     )
-                    .id(session.stableId)
+
+                    if notificationSessions.isEmpty {
+                        EmptySectionCard(
+                            icon: "bell.slash",
+                            title: "No active notifications",
+                            subtitle: "Claude sessions are tracked below while they stay alive."
+                        )
+                    } else {
+                        VStack(spacing: 4) {
+                            ForEach(notificationSessions) { session in
+                                InstanceRow(
+                                    session: session,
+                                    onFocus: { focusSession(session) },
+                                    onChat: { openChat(session) },
+                                    onArchive: { archiveSession(session) },
+                                    onApprove: { approveSession(session) },
+                                    onReject: { rejectSession(session) }
+                                )
+                                .id("notification-\(session.stableId)")
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+                    .overlay(Color.white.opacity(0.08))
+
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionHeader(
+                        title: "Active Sessions",
+                        subtitle: "Tracked Claude Code sessions on this Mac"
+                    )
+
+                    VStack(spacing: 8) {
+                        ForEach(sortedInstances) { session in
+                            ActiveSessionCard(
+                                session: session,
+                                onFocus: { focusSession(session) }
+                            )
+                            .id("active-\(session.stableId)")
+                        }
+                    }
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 6)
         }
         .scrollBounceBehavior(.basedOnSize)
     }
@@ -106,6 +155,7 @@ struct ClaudeInstancesView: View {
                     workingDirectory: session.cwd,
                     windowHint: session.windowHint,
                     isInTmux: session.isInTmux,
+                    tty: session.tty,
                     ghosttyWindowId: session.ghosttyWindowId,
                     ghosttyTabId: session.ghosttyTabId
                 )
@@ -113,6 +163,7 @@ struct ClaudeInstancesView: View {
                 _ = await TerminalFocusController.shared.focusWindow(
                     forWorkingDirectory: session.cwd,
                     windowHint: session.windowHint,
+                    tty: session.tty,
                     ghosttyWindowId: session.ghosttyWindowId,
                     ghosttyTabId: session.ghosttyTabId
                 )
@@ -134,6 +185,109 @@ struct ClaudeInstancesView: View {
 
     private func archiveSession(_ session: SessionState) {
         sessionMonitor.archiveSession(sessionId: session.sessionId)
+    }
+}
+
+private struct SectionHeader: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white.opacity(0.95))
+
+            Text(subtitle)
+                .font(.system(size: 10))
+                .foregroundColor(.white.opacity(0.42))
+        }
+    }
+}
+
+private struct SessionOverviewBar: View {
+    let sessions: [SessionState]
+
+    private var processingCount: Int {
+        sessions.filter { $0.phase == SessionPhase.processing || $0.phase == SessionPhase.compacting }.count
+    }
+
+    private var waitingCount: Int {
+        sessions.filter { $0.phase == SessionPhase.waitingForInput || $0.phase.isWaitingForApproval }.count
+    }
+
+    private var tmuxCount: Int {
+        sessions.filter(\.isInTmux).count
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            SummaryPill(label: "Active", value: "\(sessions.count)", tint: .white)
+            SummaryPill(label: "Running", value: "\(processingCount)", tint: Color(red: 0.85, green: 0.47, blue: 0.34))
+            SummaryPill(label: "Waiting", value: "\(waitingCount)", tint: TerminalColors.green)
+            SummaryPill(label: "tmux", value: "\(tmuxCount)", tint: Color(red: 0.45, green: 0.72, blue: 0.95))
+        }
+        .padding(.bottom, 2)
+    }
+}
+
+private struct SummaryPill: View {
+    let label: String
+    let value: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.5))
+
+            Text(value)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(tint.opacity(0.95))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.06))
+        )
+    }
+}
+
+private struct EmptySectionCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white.opacity(0.45))
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(0.05))
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.85))
+
+                Text(subtitle)
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.42))
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.white.opacity(0.04))
+        )
     }
 }
 
@@ -330,6 +484,165 @@ struct InstanceRow: View {
         }
     }
 
+}
+
+private struct ActiveSessionCard: View {
+    let session: SessionState
+    let onFocus: () -> Void
+
+    @State private var isHovered = false
+
+    private var canFocusTerminal: Bool {
+        session.pid != nil || !session.cwd.isEmpty
+    }
+
+    private var statusLabel: String {
+        switch session.phase {
+        case .processing: return "Running"
+        case .compacting: return "Compacting"
+        case .waitingForApproval: return "Approval"
+        case .waitingForInput: return "Waiting"
+        case .idle: return "Idle"
+        case .ended: return "Ended"
+        }
+    }
+
+    private var statusTint: Color {
+        switch session.phase {
+        case .processing, .compacting:
+            return Color(red: 0.85, green: 0.47, blue: 0.34)
+        case .waitingForApproval:
+            return TerminalColors.amber
+        case .waitingForInput:
+            return TerminalColors.green
+        case .idle, .ended:
+            return .white
+        }
+    }
+
+    private var currentToolLabel: String? {
+        if let pending = session.pendingToolName {
+            return MCPToolFormatter.formatToolName(pending)
+        }
+        if let lastTool = session.lastToolName, session.lastMessageRole == "tool" {
+            return MCPToolFormatter.formatToolName(lastTool)
+        }
+        return nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Circle()
+                    .fill(statusTint.opacity(session.phase == .idle ? 0.25 : 0.95))
+                    .frame(width: 7, height: 7)
+                    .padding(.top, 6)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(session.displayTitle)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.95))
+                            .lineLimit(1)
+
+                        CompactMetadataPill(label: statusLabel, tint: statusTint.opacity(0.9))
+                        CompactMetadataPill(label: session.isInTmux ? "tmux" : "plain", tint: session.isInTmux ? Color(red: 0.45, green: 0.72, blue: 0.95) : .white.opacity(0.7))
+                        CompactMetadataPill(label: SessionMetadataFormatter.runtimeString(since: session.createdAt), tint: .white.opacity(0.85))
+                    }
+
+                    Text(session.cwd)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.45))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer(minLength: 0)
+
+                if canFocusTerminal {
+                    IconButton(icon: "terminal") {
+                        onFocus()
+                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                SessionInfoLine(label: "Project", value: session.projectName)
+                if let pid = session.pid {
+                    SessionInfoLine(label: "PID", value: "\(pid)")
+                }
+                if let tty = session.tty, !tty.isEmpty {
+                    SessionInfoLine(label: "TTY", value: tty)
+                }
+                if let tool = currentToolLabel {
+                    SessionInfoLine(label: "Tool", value: tool)
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(isHovered ? Color.white.opacity(0.075) : Color.white.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(isHovered ? 0.08 : 0.04), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .onHover { isHovered = $0 }
+    }
+}
+
+private struct CompactMetadataPill: View {
+    let label: String
+    let tint: Color
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 9, weight: .medium, design: .monospaced))
+            .foregroundColor(tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.06))
+            )
+    }
+}
+
+private struct SessionInfoLine: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.36))
+
+            Text(value)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(.white.opacity(0.62))
+                .lineLimit(1)
+        }
+    }
+}
+
+private enum SessionMetadataFormatter {
+    static func runtimeString(since date: Date) -> String {
+        let seconds = max(0, Int(Date().timeIntervalSince(date)))
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        let remainingSeconds = seconds % 60
+
+        if hours > 0 {
+            return String(format: "%dh %02dm", hours, minutes)
+        }
+        if minutes > 0 {
+            return String(format: "%dm %02ds", minutes, remainingSeconds)
+        }
+        return "\(remainingSeconds)s"
+    }
 }
 
 // MARK: - Inline Approval Buttons

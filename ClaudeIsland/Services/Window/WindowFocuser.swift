@@ -19,6 +19,7 @@ actor WindowFocuser {
         pid: Int,
         workingDirectory: String? = nil,
         titleHints: [String] = [],
+        tty: String? = nil,
         ghosttyWindowId: String? = nil,
         ghosttyTabId: String? = nil
     ) async -> Bool {
@@ -29,6 +30,11 @@ actor WindowFocuser {
 
         guard let app = NSRunningApplication(processIdentifier: pid_t(pid)),
               app.bundleIdentifier == "com.mitchellh.ghostty" else {
+            return true
+        }
+
+        if let tty,
+           await selectGhosttyTabByTTY(appPid: pid, tty: tty, preferredWindowId: ghosttyWindowId) {
             return true
         }
 
@@ -46,6 +52,7 @@ actor WindowFocuser {
     func focusPreferredTerminalApplication(
         workingDirectory: String? = nil,
         titleHints: [String] = [],
+        tty: String? = nil,
         ghosttyWindowId: String? = nil,
         ghosttyTabId: String? = nil
     ) async -> Bool {
@@ -58,9 +65,21 @@ actor WindowFocuser {
             pid: Int(app.processIdentifier),
             workingDirectory: workingDirectory,
             titleHints: titleHints,
+            tty: tty,
             ghosttyWindowId: ghosttyWindowId,
             ghosttyTabId: ghosttyTabId
         )
+    }
+
+    private struct GhosttyTabDescriptor: Sendable {
+        let windowId: String
+        let tabId: String
+        let index: Int
+    }
+
+    private struct GhosttyTTYSession: Sendable {
+        let tty: String
+        let elapsedSeconds: Int
     }
 
     private func preferredRunningTerminalApplication() async -> NSRunningApplication? {
@@ -272,6 +291,134 @@ actor WindowFocuser {
         case .failure(let error):
             Self.logger.error("Ghostty exact tab selection failed: \(error.localizedDescription, privacy: .public)")
             return false
+        }
+    }
+
+    private func selectGhosttyTabByTTY(appPid: Int, tty: String, preferredWindowId: String?) async -> Bool {
+        guard let target = await resolveGhosttyTab(forTTY: tty, appPid: appPid, preferredWindowId: preferredWindowId) else {
+            Self.logger.info("Ghostty tty tab resolution failed for tty \(tty, privacy: .public)")
+            return false
+        }
+
+        Self.logger.info("Ghostty tty tab resolved for tty \(tty, privacy: .public): window \(target.windowId, privacy: .public) tab \(target.tabId, privacy: .public) index \(target.index, privacy: .public)")
+        return await selectGhosttyTabById(windowId: target.windowId, tabId: target.tabId)
+    }
+
+    private func resolveGhosttyTab(forTTY tty: String, appPid: Int, preferredWindowId: String?) async -> GhosttyTabDescriptor? {
+        let tabs = await listGhosttyTabs(preferredWindowId: preferredWindowId)
+        guard !tabs.isEmpty else {
+            return nil
+        }
+
+        let ttySessions = ghosttyTTYOrder(appPid: appPid)
+        guard let targetPosition = ttySessions.firstIndex(where: { $0.tty == tty }) else {
+            let availableTTYs = ttySessions.map(\.tty).joined(separator: ", ")
+            Self.logger.info("Ghostty tty \(tty, privacy: .public) not found among sessions: \(availableTTYs, privacy: .public)")
+            return nil
+        }
+
+        let tabIndex = targetPosition + 1
+        return tabs.first(where: { $0.index == tabIndex })
+    }
+
+    private func listGhosttyTabs(preferredWindowId: String?) async -> [GhosttyTabDescriptor] {
+        let scriptLines = [
+            "on run argv",
+            "tell application id \"com.mitchellh.ghostty\"",
+            "set targetWindowId to \"\"",
+            "if (count of argv) > 0 then set targetWindowId to item 1 of argv as text",
+            "set outputLines to {}",
+            "repeat with currentWindow in windows",
+            "set currentWindowId to id of currentWindow as text",
+            "if targetWindowId is \"\" or currentWindowId is equal to targetWindowId then",
+            "repeat with currentTab in tabs of currentWindow",
+            "set end of outputLines to currentWindowId & \"|\" & (id of currentTab as text) & \"|\" & (index of currentTab as text)",
+            "end repeat",
+            "end if",
+            "end repeat",
+            "end tell",
+            "set AppleScript's text item delimiters to linefeed",
+            "return outputLines as text",
+            "end run"
+        ]
+
+        let arguments = scriptLines.flatMap { ["-e", $0] } + ["--"] + (preferredWindowId.map { [$0] } ?? [])
+        let result = await ProcessExecutor.shared.runWithResult("/usr/bin/osascript", arguments: arguments)
+        guard case .success(let processResult) = result else {
+            return []
+        }
+
+        return processResult.output
+            .components(separatedBy: .newlines)
+            .compactMap { line in
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return nil }
+                let parts = trimmed.components(separatedBy: "|")
+                guard parts.count == 3, let index = Int(parts[2]) else { return nil }
+                return GhosttyTabDescriptor(windowId: parts[0], tabId: parts[1], index: index)
+            }
+            .sorted { lhs, rhs in
+                if lhs.windowId == rhs.windowId {
+                    return lhs.index < rhs.index
+                }
+                return lhs.windowId < rhs.windowId
+            }
+    }
+
+    private func ghosttyTTYOrder(appPid: Int) -> [GhosttyTTYSession] {
+        guard let output = ProcessExecutor.shared.runSyncOrNil("/bin/ps", arguments: ["-axo", "pid=,ppid=,tty=,etime=,command="]) else {
+            return []
+        }
+
+        var sessions: [GhosttyTTYSession] = []
+
+        for rawLine in output.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { continue }
+
+            let parts = line.split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
+            guard parts.count == 5,
+                  let ppid = Int(parts[1]),
+                  ppid == appPid else { continue }
+
+            let tty = String(parts[2])
+            let elapsed = String(parts[3])
+            let command = String(parts[4])
+
+            guard tty != "??",
+                  command.contains("/usr/bin/login -flp") else { continue }
+
+            sessions.append(GhosttyTTYSession(tty: tty, elapsedSeconds: parseElapsedSeconds(elapsed)))
+        }
+
+        return sessions.sorted { lhs, rhs in
+            lhs.elapsedSeconds > rhs.elapsedSeconds
+        }
+    }
+
+    private func parseElapsedSeconds(_ value: String) -> Int {
+        let dayHourParts = value.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: true)
+        let timePart: String
+        let daySeconds: Int
+
+        if dayHourParts.count == 2, let days = Int(dayHourParts[0]) {
+            daySeconds = days * 86_400
+            timePart = String(dayHourParts[1])
+        } else {
+            daySeconds = 0
+            timePart = value
+        }
+
+        let timeComponents = timePart.split(separator: ":").compactMap { Int($0) }
+        switch timeComponents.count {
+        case 3:
+            return daySeconds + (timeComponents[0] * 3600) + (timeComponents[1] * 60) + timeComponents[2]
+        case 2:
+            return daySeconds + (timeComponents[0] * 60) + timeComponents[1]
+        case 1:
+            return daySeconds + timeComponents[0]
+        default:
+            return daySeconds
         }
     }
 }
