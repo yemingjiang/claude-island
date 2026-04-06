@@ -105,12 +105,16 @@ struct ClaudeInstancesView: View {
                     forClaudePid: pid,
                     workingDirectory: session.cwd,
                     windowHint: session.windowHint,
-                    isInTmux: session.isInTmux
+                    isInTmux: session.isInTmux,
+                    ghosttyWindowId: session.ghosttyWindowId,
+                    ghosttyTabId: session.ghosttyTabId
                 )
             } else {
                 _ = await TerminalFocusController.shared.focusWindow(
                     forWorkingDirectory: session.cwd,
-                    windowHint: session.windowHint
+                    windowHint: session.windowHint,
+                    ghosttyWindowId: session.ghosttyWindowId,
+                    ghosttyTabId: session.ghosttyTabId
                 )
             }
         }

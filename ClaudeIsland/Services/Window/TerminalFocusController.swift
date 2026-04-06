@@ -15,14 +15,23 @@ actor TerminalFocusController {
     private init() {}
 
     func focusWindow(forClaudePid claudePid: Int) async -> Bool {
-        await focusWindow(forClaudePid: claudePid, workingDirectory: nil, windowHint: nil, isInTmux: nil)
+        await focusWindow(
+            forClaudePid: claudePid,
+            workingDirectory: nil,
+            windowHint: nil,
+            isInTmux: nil,
+            ghosttyWindowId: nil,
+            ghosttyTabId: nil
+        )
     }
 
     func focusWindow(
         forClaudePid claudePid: Int,
         workingDirectory: String?,
         windowHint: String?,
-        isInTmux: Bool?
+        isInTmux: Bool?,
+        ghosttyWindowId: String?,
+        ghosttyTabId: String?
     ) async -> Bool {
         let tree = ProcessTreeBuilder.shared.buildTree()
         let resolvedIsInTmux = isInTmux ?? ProcessTreeBuilder.shared.isInTmux(pid: claudePid, tree: tree)
@@ -32,6 +41,8 @@ actor TerminalFocusController {
                 claudePid: claudePid,
                 workingDirectory: workingDirectory,
                 windowHint: windowHint,
+                ghosttyWindowId: ghosttyWindowId,
+                ghosttyTabId: ghosttyTabId,
                 tree: tree
             )
         }
@@ -40,29 +51,52 @@ actor TerminalFocusController {
             return await WindowFocuser.shared.focusTerminalApplication(
                 pid: terminalPid,
                 workingDirectory: workingDirectory,
-                titleHints: titleHints(workingDirectory: workingDirectory, windowHint: windowHint)
+                titleHints: titleHints(workingDirectory: workingDirectory, windowHint: windowHint),
+                ghosttyWindowId: ghosttyWindowId,
+                ghosttyTabId: ghosttyTabId
             )
         }
 
         if let workingDirectory {
-            return await focusWindow(forWorkingDir: workingDirectory, windowHint: windowHint)
+            return await focusWindow(
+                forWorkingDir: workingDirectory,
+                windowHint: windowHint,
+                ghosttyWindowId: ghosttyWindowId,
+                ghosttyTabId: ghosttyTabId
+            )
         }
 
         return false
     }
 
     func focusWindow(forWorkingDirectory workingDirectory: String) async -> Bool {
-        await focusWindow(forWorkingDirectory: workingDirectory, windowHint: nil)
+        await focusWindow(forWorkingDirectory: workingDirectory, windowHint: nil, ghosttyWindowId: nil, ghosttyTabId: nil)
     }
 
     func focusWindow(forWorkingDirectory workingDirectory: String, windowHint: String?) async -> Bool {
-        await focusWindow(forWorkingDir: workingDirectory, windowHint: windowHint)
+        await focusWindow(forWorkingDirectory: workingDirectory, windowHint: windowHint, ghosttyWindowId: nil, ghosttyTabId: nil)
+    }
+
+    func focusWindow(
+        forWorkingDirectory workingDirectory: String,
+        windowHint: String?,
+        ghosttyWindowId: String?,
+        ghosttyTabId: String?
+    ) async -> Bool {
+        await focusWindow(
+            forWorkingDir: workingDirectory,
+            windowHint: windowHint,
+            ghosttyWindowId: ghosttyWindowId,
+            ghosttyTabId: ghosttyTabId
+        )
     }
 
     private func focusTmuxInstance(
         claudePid: Int,
         workingDirectory: String?,
         windowHint: String?,
+        ghosttyWindowId: String?,
+        ghosttyTabId: String?,
         tree: [Int: ProcessInfo]
     ) async -> Bool {
         guard let target = await TmuxController.shared.findTmuxTarget(forClaudePid: claudePid) else {
@@ -76,14 +110,21 @@ actor TerminalFocusController {
             return await WindowFocuser.shared.focusTerminalApplication(
                 pid: terminalPid,
                 workingDirectory: fallbackWorkingDirectory,
-                titleHints: titleHints(workingDirectory: fallbackWorkingDirectory, windowHint: windowHint)
+                titleHints: titleHints(workingDirectory: fallbackWorkingDirectory, windowHint: windowHint),
+                ghosttyWindowId: ghosttyWindowId,
+                ghosttyTabId: ghosttyTabId
             )
         }
 
         return false
     }
 
-    private func focusWindow(forWorkingDir workingDir: String, windowHint: String?) async -> Bool {
+    private func focusWindow(
+        forWorkingDir workingDir: String,
+        windowHint: String?,
+        ghosttyWindowId: String?,
+        ghosttyTabId: String?
+    ) async -> Bool {
         let tree = ProcessTreeBuilder.shared.buildTree()
 
         let focusedTmuxPane = await focusTmuxPane(
@@ -97,7 +138,9 @@ actor TerminalFocusController {
 
         return await WindowFocuser.shared.focusPreferredTerminalApplication(
             workingDirectory: workingDir,
-            titleHints: titleHints(workingDirectory: workingDir, windowHint: windowHint)
+            titleHints: titleHints(workingDirectory: workingDir, windowHint: windowHint),
+            ghosttyWindowId: ghosttyWindowId,
+            ghosttyTabId: ghosttyTabId
         )
     }
 
@@ -170,7 +213,9 @@ actor TerminalFocusController {
                             return await WindowFocuser.shared.focusTerminalApplication(
                                 pid: terminalPid,
                                 workingDirectory: workingDir,
-                                titleHints: titleHints(workingDirectory: workingDir, windowHint: windowHint)
+                                titleHints: titleHints(workingDirectory: workingDir, windowHint: windowHint),
+                                ghosttyWindowId: nil,
+                                ghosttyTabId: nil
                             )
                         }
                     }

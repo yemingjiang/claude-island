@@ -132,6 +132,12 @@ actor SessionStore {
         if let tty = event.tty {
             session.tty = tty.replacingOccurrences(of: "/dev/", with: "")
         }
+        if let ghosttyWindowId = event.ghosttyWindowId, !ghosttyWindowId.isEmpty {
+            session.ghosttyWindowId = ghosttyWindowId
+        }
+        if let ghosttyTabId = event.ghosttyTabId, !ghosttyTabId.isEmpty {
+            session.ghosttyTabId = ghosttyTabId
+        }
         session.lastActivity = Date()
 
         if event.status == "ended" {
@@ -176,6 +182,8 @@ actor SessionStore {
             pid: event.pid,
             tty: event.tty?.replacingOccurrences(of: "/dev/", with: ""),
             isInTmux: false,  // Will be updated
+            ghosttyWindowId: event.ghosttyWindowId,
+            ghosttyTabId: event.ghosttyTabId,
             phase: .idle
         )
     }

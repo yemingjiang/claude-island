@@ -7,6 +7,7 @@ Claude Island Hook
 import json
 import os
 import socket
+import subprocess
 import sys
 
 SOCKET_PATH = "/tmp/claude-island.sock"
@@ -49,6 +50,73 @@ def get_tty():
     return None
 
 
+def get_process_info(pid):
+    """Return (ppid, command) for a pid."""
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "ppid=", "-o", "comm="],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        line = result.stdout.strip()
+        if not line:
+            return None, None
+
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            return None, None
+
+        return int(parts[0]), parts[1]
+    except Exception:
+        return None, None
+
+
+def is_running_in_ghostty(pid):
+    """Walk process ancestors to confirm this Claude session lives inside Ghostty."""
+    current = pid
+    visited = set()
+
+    while current and current > 1 and current not in visited:
+        visited.add(current)
+        parent_pid, command = get_process_info(current)
+        if command and "ghostty" in command.lower():
+            return True
+        current = parent_pid
+
+    return False
+
+
+def get_ghostty_context():
+    """Get the front Ghostty window/tab identifiers when Ghostty is hosting the session."""
+    script = [
+        "tell application id \"com.mitchellh.ghostty\"",
+        "if (count of windows) is 0 then return \"\"",
+        "set currentWindow to front window",
+        "return (id of currentWindow as text) & \"|\" & (id of selected tab of currentWindow as text)",
+        "end tell",
+    ]
+
+    try:
+        result = subprocess.run(
+            ["osascript", *sum([["-e", line] for line in script], [])],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return None, None
+
+        output = result.stdout.strip()
+        if not output or "|" not in output:
+            return None, None
+
+        window_id, tab_id = output.split("|", 1)
+        return window_id or None, tab_id or None
+    except Exception:
+        return None, None
+
+
 def send_event(state):
     """Send event to app, return response if any"""
     try:
@@ -85,6 +153,10 @@ def main():
     # Get process info
     claude_pid = os.getppid()
     tty = get_tty()
+    if is_running_in_ghostty(claude_pid):
+        ghostty_window_id, ghostty_tab_id = get_ghostty_context()
+    else:
+        ghostty_window_id, ghostty_tab_id = None, None
 
     # Build state object
     state = {
@@ -93,6 +165,8 @@ def main():
         "event": event,
         "pid": claude_pid,
         "tty": tty,
+        "ghostty_window_id": ghostty_window_id,
+        "ghostty_tab_id": ghostty_tab_id,
     }
 
     # Map events to status
