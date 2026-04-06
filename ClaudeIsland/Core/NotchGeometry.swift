@@ -15,7 +15,7 @@ struct NotchGeometry: Sendable {
     let windowHeight: CGFloat
 
     /// Extra rendered width added by opened-state padding and corner treatment.
-    static let openedVisualWidthPadding: CGFloat = 62
+    static let openedVisualWidthPadding: CGFloat = 40
 
     private var notchCenterX: CGFloat {
         screenRect.midX
@@ -78,21 +78,26 @@ struct NotchGeometry: Sendable {
         windowRect(for: openedScreenRect(for: size))
     }
 
-    /// The closed panel rect in window coordinates for a rendered width.
-    func closedWindowRect(contentWidth: CGFloat, contentHeight: CGFloat) -> CGRect {
-        let width = max(contentWidth, deviceNotchRect.width)
-        let screenSpaceRect = CGRect(
-            x: leadingXForPanel(width: width),
+    /// The closed capsule rect in screen coordinates for a given visual size.
+    func closedScreenRect(contentWidth: CGFloat, contentHeight: CGFloat) -> CGRect {
+        CGRect(
+            x: leadingXForPanel(width: contentWidth),
             y: screenRect.maxY - contentHeight,
-            width: width,
+            width: contentWidth,
             height: contentHeight
         )
-        return windowRect(for: screenSpaceRect)
+    }
+
+    /// The closed panel rect in window coordinates for a rendered width.
+    func closedWindowRect(contentWidth: CGFloat, contentHeight: CGFloat) -> CGRect {
+        windowRect(for: closedScreenRect(contentWidth: contentWidth, contentHeight: contentHeight))
     }
 
     /// Check if a point is in the notch area (with padding for easier interaction)
-    func isPointInNotch(_ point: CGPoint) -> Bool {
-        notchScreenRect.insetBy(dx: -10, dy: -5).contains(point)
+    func isPointInClosedCapsule(_ point: CGPoint, contentWidth: CGFloat, contentHeight: CGFloat) -> Bool {
+        closedScreenRect(contentWidth: contentWidth, contentHeight: contentHeight)
+            .insetBy(dx: -8, dy: -5)
+            .contains(point)
     }
 
     /// Check if a point is in the opened panel area

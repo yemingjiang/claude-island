@@ -40,6 +40,10 @@ enum NotchContentType: Equatable {
 @MainActor
 class NotchViewModel: ObservableObject {
     private static let menuBaseHeight: CGFloat = 460
+    private static let closedCapsuleHeight: CGFloat = 28
+    private static let instancesPanelWidth: CGFloat = 320
+    private static let instancesPanelHeight: CGFloat = 210
+    private static let regularPanelWidth: CGFloat = 400
 
     // MARK: - Published State
 
@@ -62,6 +66,9 @@ class NotchViewModel: ObservableObject {
     var deviceNotchRect: CGRect { geometry.deviceNotchRect }
     var screenRect: CGRect { geometry.screenRect }
     var windowHeight: CGFloat { geometry.windowHeight }
+    var closedCapsuleSize: CGSize {
+        CGSize(width: deviceNotchRect.width, height: min(deviceNotchRect.height, Self.closedCapsuleHeight))
+    }
 
     /// Dynamic opened size based on content type
     var openedSize: CGSize {
@@ -75,13 +82,13 @@ class NotchViewModel: ObservableObject {
         case .menu:
             // Compact size for settings menu
             return CGSize(
-                width: min(screenRect.width * 0.4, 480),
+                width: min(screenRect.width * 0.34, Self.regularPanelWidth),
                 height: Self.menuBaseHeight + screenSelector.expandedPickerHeight + soundSelector.expandedPickerHeight
             )
         case .instances:
             return CGSize(
-                width: min(screenRect.width * 0.4, 480),
-                height: 320
+                width: min(screenRect.width * 0.28, Self.instancesPanelWidth),
+                height: Self.instancesPanelHeight
             )
         }
     }
@@ -149,7 +156,11 @@ class NotchViewModel: ObservableObject {
     private var currentChatSession: SessionState?
 
     private func handleMouseMove(_ location: CGPoint) {
-        let inNotch = geometry.isPointInNotch(location)
+        let inNotch = geometry.isPointInClosedCapsule(
+            location,
+            contentWidth: closedCapsuleSize.width,
+            contentHeight: closedCapsuleSize.height
+        )
         let inOpened = status == .opened && geometry.isPointInOpenedPanel(location, size: openedSize)
 
         let newHovering = inNotch || inOpened
@@ -185,7 +196,11 @@ class NotchViewModel: ObservableObject {
                 repostClickAt(location)
             }
         case .closed, .popping:
-            if geometry.isPointInNotch(location) {
+            if geometry.isPointInClosedCapsule(
+                location,
+                contentWidth: closedCapsuleSize.width,
+                contentHeight: closedCapsuleSize.height
+            ) {
                 notchOpen(reason: .click)
             }
         }

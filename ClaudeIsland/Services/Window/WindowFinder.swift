@@ -5,12 +5,14 @@
 //  Finds windows using yabai window manager
 //
 
+import AppKit
 import Foundation
 
 /// Information about a yabai window
 struct YabaiWindow: Sendable {
     let id: Int
     let pid: Int
+    let app: String
     let title: String
     let space: Int
     let isVisible: Bool
@@ -22,6 +24,7 @@ struct YabaiWindow: Sendable {
 
         self.id = id
         self.pid = pid
+        self.app = dict["app"] as? String ?? ""
         self.title = dict["title"] as? String ?? ""
         self.space = dict["space"] as? Int ?? 0
         self.isVisible = dict["is-visible"] as? Bool ?? false
@@ -94,5 +97,76 @@ actor WindowFinder {
     /// Find any non-Claude window for a terminal
     nonisolated func findNonClaudeWindow(forTerminalPid pid: Int, windows: [YabaiWindow]) -> YabaiWindow? {
         windows.first { $0.pid == pid && !$0.title.contains("✳") }
+    }
+
+    /// Find the best matching window for a terminal app.
+    /// Prefers title matches for the current Claude session, then any visible window, then any non-Claude window.
+    nonisolated func findPreferredWindow(forTerminalPid pid: Int, titleHints: [String], windows: [YabaiWindow]) -> YabaiWindow? {
+        let candidates = windows.filter { $0.pid == pid }
+        guard !candidates.isEmpty else { return nil }
+
+        let normalizedHints = titleHints
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { $0.count >= 2 }
+
+        if let titleMatch = candidates.first(where: { window in
+            let title = window.title.lowercased()
+            return normalizedHints.contains(where: { title.contains($0) })
+        }) {
+            return titleMatch
+        }
+
+        if let visible = candidates.first(where: { $0.isVisible && !$0.title.contains("✳") }) {
+            return visible
+        }
+
+        if let nonClaude = findNonClaudeWindow(forTerminalPid: pid, windows: candidates) {
+            return nonClaude
+        }
+
+        return candidates.first
+    }
+
+    /// Find the best matching terminal window across all terminal apps.
+    nonisolated func findPreferredTerminalWindow(titleHints: [String], windows: [YabaiWindow]) -> YabaiWindow? {
+        let candidates = windows.filter { isTerminalWindow($0) }
+        guard !candidates.isEmpty else { return nil }
+
+        let normalizedHints = titleHints
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { $0.count >= 2 }
+
+        if let titleMatch = candidates.first(where: { window in
+            let title = window.title.lowercased()
+            return normalizedHints.contains(where: { title.contains($0) })
+        }) {
+            return titleMatch
+        }
+
+        if let focused = candidates.first(where: \.hasFocus) {
+            return focused
+        }
+
+        if let visible = candidates.first(where: \.isVisible) {
+            return visible
+        }
+
+        return candidates.first
+    }
+
+    private nonisolated func isTerminalWindow(_ window: YabaiWindow) -> Bool {
+        if TerminalAppRegistry.isTerminal(window.app) {
+            return true
+        }
+
+        guard let app = NSRunningApplication(processIdentifier: pid_t(window.pid)) else {
+            return false
+        }
+
+        if let bundleId = app.bundleIdentifier, TerminalAppRegistry.isTerminalBundle(bundleId) {
+            return true
+        }
+
+        return TerminalAppRegistry.isTerminal(app.localizedName ?? "")
     }
 }

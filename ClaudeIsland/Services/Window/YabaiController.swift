@@ -17,6 +17,16 @@ actor YabaiController {
 
     /// Focus the terminal window for a given Claude PID (tmux only)
     func focusWindow(forClaudePid claudePid: Int) async -> Bool {
+        await focusWindow(forClaudePid: claudePid, workingDirectory: nil, windowHint: nil, isInTmux: nil)
+    }
+
+    /// Focus the terminal window for a Claude session, preferring the matching Ghostty/terminal window when possible.
+    func focusWindow(
+        forClaudePid claudePid: Int,
+        workingDirectory: String?,
+        windowHint: String?,
+        isInTmux: Bool?
+    ) async -> Bool {
         guard await WindowFinder.shared.isYabaiAvailable() else {
             return false
         }
@@ -24,14 +34,36 @@ actor YabaiController {
         let windows = await WindowFinder.shared.getAllWindows()
         let tree = ProcessTreeBuilder.shared.buildTree()
 
-        return await focusTmuxInstance(claudePid: claudePid, tree: tree, windows: windows)
+        let resolvedIsInTmux = isInTmux ?? ProcessTreeBuilder.shared.isInTmux(pid: claudePid, tree: tree)
+        if resolvedIsInTmux {
+            return await focusTmuxInstance(claudePid: claudePid, tree: tree, windows: windows)
+        }
+
+        if let terminalPid = ProcessTreeBuilder.shared.findTerminalPid(forProcess: claudePid, tree: tree) {
+            return await WindowFocuser.shared.focusTerminalWindow(
+                terminalPid: terminalPid,
+                titleHints: titleHints(workingDirectory: workingDirectory, windowHint: windowHint),
+                windows: windows
+            )
+        }
+
+        if let workingDirectory {
+            return await focusWindow(forWorkingDir: workingDirectory, windowHint: windowHint)
+        }
+
+        return false
     }
 
     /// Focus the terminal window for a given working directory (tmux only, fallback)
     func focusWindow(forWorkingDirectory workingDirectory: String) async -> Bool {
+        await focusWindow(forWorkingDirectory: workingDirectory, windowHint: nil)
+    }
+
+    /// Focus the terminal window for a given working directory, using title hints when available.
+    func focusWindow(forWorkingDirectory workingDirectory: String, windowHint: String?) async -> Bool {
         guard await WindowFinder.shared.isYabaiAvailable() else { return false }
 
-        return await focusWindow(forWorkingDir: workingDirectory)
+        return await focusWindow(forWorkingDir: workingDirectory, windowHint: windowHint)
     }
 
     // MARK: - Private Implementation
@@ -53,11 +85,24 @@ actor YabaiController {
         return false
     }
 
-    private func focusWindow(forWorkingDir workingDir: String) async -> Bool {
+    private func focusWindow(forWorkingDir workingDir: String, windowHint: String?) async -> Bool {
         let windows = await WindowFinder.shared.getAllWindows()
         let tree = ProcessTreeBuilder.shared.buildTree()
 
-        return await focusTmuxPane(forWorkingDir: workingDir, tree: tree, windows: windows)
+        let focusedTmuxPane = await focusTmuxPane(
+            forWorkingDir: workingDir,
+            windowHint: windowHint,
+            tree: tree,
+            windows: windows
+        )
+        if focusedTmuxPane {
+            return true
+        }
+
+        return await WindowFocuser.shared.focusTerminalWindow(
+            titleHints: titleHints(workingDirectory: workingDir, windowHint: windowHint),
+            windows: windows
+        )
     }
 
     // MARK: - Tmux Helpers
@@ -95,11 +140,15 @@ actor YabaiController {
 
     /// Check if command is a terminal (nonisolated helper to avoid MainActor access)
     private nonisolated func isTerminalProcess(_ command: String) -> Bool {
-        let terminalCommands = ["Terminal", "iTerm", "iTerm2", "Alacritty", "kitty", "WezTerm", "wezterm-gui", "Hyper"]
-        return terminalCommands.contains { command.contains($0) }
+        TerminalAppRegistry.isTerminal(command) || command.lowercased().contains("ghostty")
     }
 
-    private func focusTmuxPane(forWorkingDir workingDir: String, tree: [Int: ProcessInfo], windows: [YabaiWindow]) async -> Bool {
+    private func focusTmuxPane(
+        forWorkingDir workingDir: String,
+        windowHint: String?,
+        tree: [Int: ProcessInfo],
+        windows: [YabaiWindow]
+    ) async -> Bool {
         guard let tmuxPath = await TmuxPathFinder.shared.getTmuxPath() else { return false }
 
         do {
@@ -132,6 +181,15 @@ actor YabaiController {
 
                         // Focus the terminal window for this session
                         if let terminalPid = await findTmuxClientTerminal(forSession: target.session, tree: tree, windows: windows) {
+                            let focusedPreferredWindow = await WindowFocuser.shared.focusTerminalWindow(
+                                terminalPid: terminalPid,
+                                titleHints: titleHints(workingDirectory: workingDir, windowHint: windowHint),
+                                windows: windows
+                            )
+                            if focusedPreferredWindow {
+                                return true
+                            }
+
                             return await WindowFocuser.shared.focusTmuxWindow(terminalPid: terminalPid, windows: windows)
                         }
                     }
@@ -143,5 +201,21 @@ actor YabaiController {
         }
 
         return false
+    }
+
+    private nonisolated func titleHints(workingDirectory: String?, windowHint: String?) -> [String] {
+        var hints: [String] = []
+
+        if let windowHint, !windowHint.isEmpty {
+            hints.append(windowHint)
+        }
+
+        if let workingDirectory, !workingDirectory.isEmpty {
+            let url = URL(fileURLWithPath: workingDirectory)
+            hints.append(url.lastPathComponent)
+            hints.append(workingDirectory)
+        }
+
+        return hints
     }
 }

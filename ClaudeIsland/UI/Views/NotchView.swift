@@ -12,8 +12,9 @@ import SwiftUI
 // Corner radius constants
 private let cornerRadiusInsets = (
     opened: (top: CGFloat(19), bottom: CGFloat(24)),
-    closed: (top: CGFloat(6), bottom: CGFloat(14))
+    closed: (top: CGFloat(5), bottom: CGFloat(10))
 )
+private let closedCapsuleHorizontalPadding: CGFloat = 6
 
 struct NotchView: View {
     @ObservedObject var viewModel: NotchViewModel
@@ -56,54 +57,21 @@ struct NotchView: View {
 
     // MARK: - Sizing
 
-    private var closedNotchSize: CGSize {
-        CGSize(
-            width: viewModel.deviceNotchRect.width,
-            height: viewModel.deviceNotchRect.height
-        )
-    }
-
-    /// Extra width for expanding activities (like Dynamic Island)
-    private var expansionWidth: CGFloat {
-        // Permission indicator adds width on left side only
-        let permissionIndicatorWidth: CGFloat = hasPendingPermission ? 18 : 0
-
-        // Expand for processing activity
-        if activityCoordinator.expandingActivity.show {
-            switch activityCoordinator.expandingActivity.type {
-            case .claude:
-                let baseWidth = 2 * max(0, closedNotchSize.height - 12) + 20
-                return baseWidth + permissionIndicatorWidth
-            case .none:
-                break
-            }
-        }
-
-        // Expand for pending permissions (left indicator) or waiting for input (checkmark on right)
-        if hasPendingPermission {
-            return 2 * max(0, closedNotchSize.height - 12) + 20 + permissionIndicatorWidth
-        }
-
-        // Waiting for input just shows checkmark on right, no extra left indicator
-        if hasWaitingForInput {
-            return 2 * max(0, closedNotchSize.height - 12) + 20
-        }
-
-        return 0
+    private var closedCapsuleSize: CGSize {
+        viewModel.closedCapsuleSize
     }
 
     private var notchSize: CGSize {
         switch viewModel.status {
         case .closed, .popping:
-            return closedNotchSize
+            return closedCapsuleSize
         case .opened:
             return viewModel.openedSize
         }
     }
 
-    /// Width of the closed content (notch + any expansion)
     private var closedContentWidth: CGFloat {
-        closedNotchSize.width + expansionWidth
+        closedCapsuleSize.width
     }
 
     private var panelOriginX: CGFloat {
@@ -113,7 +81,7 @@ struct NotchView: View {
         case .closed, .popping:
             viewModel.geometry.closedWindowRect(
                 contentWidth: closedContentWidth,
-                contentHeight: closedNotchSize.height
+                contentHeight: closedCapsuleSize.height
             ).minX
         }
     }
@@ -154,11 +122,11 @@ struct NotchView: View {
                         maxWidth: viewModel.status == .opened ? notchSize.width : nil,
                         alignment: .top
                     )
-                    .padding(
-                        .horizontal,
-                        viewModel.status == .opened
+                .padding(
+                    .horizontal,
+                    viewModel.status == .opened
                             ? cornerRadiusInsets.opened.top
-                            : cornerRadiusInsets.closed.bottom
+                            : closedCapsuleHorizontalPadding
                     )
                     .padding([.horizontal, .bottom], viewModel.status == .opened ? 12 : 0)
                     .background(.black)
@@ -238,7 +206,7 @@ struct NotchView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row - always present, contains crab and spinner that persist across states
             headerRow
-                .frame(height: max(24, closedNotchSize.height))
+                .frame(height: max(24, closedCapsuleSize.height))
 
             // Main content only when opened
             if viewModel.status == .opened {
@@ -260,71 +228,53 @@ struct NotchView: View {
 
     @ViewBuilder
     private var headerRow: some View {
-        HStack(spacing: 0) {
-            // Left side - crab + optional permission indicator (visible when processing, pending, or waiting for input)
-            if showClosedActivity {
-                HStack(spacing: 4) {
-                    ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
-                        .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: showClosedActivity)
-
-                    // Permission indicator only (amber) - waiting for input shows checkmark on right
-                    if hasPendingPermission {
-                        PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
-                            .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
-                    }
-                }
-                .frame(width: viewModel.status == .opened ? nil : sideWidth + (hasPendingPermission ? 18 : 0))
-                .padding(.leading, viewModel.status == .opened ? 8 : 0)
-            }
-
-            // Center content
-            if viewModel.status == .opened {
-                // Opened: show header content
-                openedHeaderContent
-            } else if !showClosedActivity {
-                // Closed without activity: empty space
-                Rectangle()
-                    .fill(.clear)
-                    .frame(width: closedNotchSize.width - 20)
-            } else {
-                // Closed with activity: black spacer (with optional bounce)
-                Rectangle()
-                    .fill(.black)
-                    .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 16 : 0))
-            }
-
-            // Right side - spinner when processing/pending, checkmark when waiting for input
-            if showClosedActivity {
-                if isProcessing || hasPendingPermission {
-                    ProcessingSpinner()
-                        .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
-                        .frame(width: viewModel.status == .opened ? 20 : sideWidth)
-                } else if hasWaitingForInput {
-                    // Checkmark for waiting-for-input on the right side
-                    ReadyForInputIndicatorIcon(size: 14, color: TerminalColors.green)
-                        .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
-                        .frame(width: viewModel.status == .opened ? 20 : sideWidth)
-                }
-            }
+        if viewModel.status == .opened {
+            openedHeaderRow
+        } else {
+            closedHeaderRow
         }
-        .frame(height: closedNotchSize.height)
     }
 
-    private var sideWidth: CGFloat {
-        max(0, closedNotchSize.height - 12) + 10
+    private var closedHeaderRow: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
+                    .matchedGeometryEffect(id: "crab", in: activityNamespace)
+
+                if hasPendingPermission {
+                    PermissionIndicatorIcon(size: 13, color: Color(red: 0.85, green: 0.47, blue: 0.34))
+                        .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            if isProcessing || hasPendingPermission {
+                ProcessingSpinner()
+                    .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
+                    .frame(width: 14, height: 14)
+            } else if hasWaitingForInput {
+                ReadyForInputIndicatorIcon(size: 13, color: TerminalColors.green)
+                    .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
+                    .frame(width: 14, height: 14)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(width: closedCapsuleSize.width + (isBouncing ? 10 : 0), height: closedCapsuleSize.height)
     }
 
     // MARK: - Opened Header Content
 
     @ViewBuilder
-    private var openedHeaderContent: some View {
+    private var openedHeaderRow: some View {
         HStack(spacing: 12) {
-            // Show static crab only if not showing activity in headerRow
-            // (headerRow handles crab + indicator when showClosedActivity is true)
-            if !showClosedActivity {
-                ClaudeCrabIcon(size: 14)
-                    .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: !showClosedActivity)
-                    .padding(.leading, 8)
+            ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
+                .matchedGeometryEffect(id: "crab", in: activityNamespace)
+                .padding(.leading, 8)
+
+            if hasPendingPermission {
+                PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
+                    .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
             }
 
             Spacer()

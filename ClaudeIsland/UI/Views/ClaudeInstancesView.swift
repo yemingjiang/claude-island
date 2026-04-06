@@ -23,15 +23,26 @@ struct ClaudeInstancesView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            Text("No sessions")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.white.opacity(0.4))
+        HStack(spacing: 10) {
+            ClaudeCrabIcon(
+                size: 18,
+                color: Color(red: 0.95, green: 0.68, blue: 0.55)
+            )
 
-            Text("Run claude in terminal")
-                .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.25))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Waiting for Claude")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.92))
+
+                Text("Run `claude` in Terminal to see live activity")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.42))
+            }
+
+            Spacer(minLength: 0)
         }
+        .padding(.top, 12)
+        .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -88,13 +99,19 @@ struct ClaudeInstancesView: View {
     // MARK: - Actions
 
     private func focusSession(_ session: SessionState) {
-        guard session.isInTmux else { return }
-
         Task {
             if let pid = session.pid {
-                _ = await YabaiController.shared.focusWindow(forClaudePid: pid)
+                _ = await YabaiController.shared.focusWindow(
+                    forClaudePid: pid,
+                    workingDirectory: session.cwd,
+                    windowHint: session.windowHint,
+                    isInTmux: session.isInTmux
+                )
             } else {
-                _ = await YabaiController.shared.focusWindow(forWorkingDirectory: session.cwd)
+                _ = await YabaiController.shared.focusWindow(
+                    forWorkingDirectory: session.cwd,
+                    windowHint: session.windowHint
+                )
             }
         }
     }
@@ -133,6 +150,10 @@ struct InstanceRow: View {
     private let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
     private let spinnerSymbols = ["·", "✢", "✳", "∗", "✻", "✽"]
     private let spinnerTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
+
+    private var canFocusTerminal: Bool {
+        isYabaiAvailable
+    }
 
     /// Whether we're showing the approval UI
     private var isWaitingForApproval: Bool {
@@ -237,7 +258,7 @@ struct InstanceRow: View {
                     // Go to Terminal button (only if yabai available)
                     if isYabaiAvailable {
                         TerminalButton(
-                            isEnabled: session.isInTmux,
+                            isEnabled: canFocusTerminal,
                             onTap: { onFocus() }
                         )
                     }
@@ -257,9 +278,9 @@ struct InstanceRow: View {
                         onChat()
                     }
 
-                    // Focus icon (only for tmux instances with yabai)
-                    if session.isInTmux && isYabaiAvailable {
-                        IconButton(icon: "eye") {
+                    // Jump to terminal window (prefers Ghostty when available)
+                    if canFocusTerminal {
+                        IconButton(icon: "terminal") {
                             onFocus()
                         }
                     }

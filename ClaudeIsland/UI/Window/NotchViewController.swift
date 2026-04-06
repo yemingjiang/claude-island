@@ -48,7 +48,10 @@ class NotchViewController: NSViewController {
             case .opened:
                 return geometry.openedWindowRect(for: vm.openedSize)
             case .closed, .popping:
-                return geometry.notchWindowRect.insetBy(dx: -10, dy: -5)
+                return geometry.closedWindowRect(
+                    contentWidth: vm.closedCapsuleSize.width,
+                    contentHeight: vm.closedCapsuleSize.height
+                ).insetBy(dx: -8, dy: -5)
             }
         }
 
