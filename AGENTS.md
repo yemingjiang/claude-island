@@ -13,7 +13,8 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 xcodebuild -scheme ClaudeIsland -configuration Debug build
 ```
 
-No test targets exist in this project. Build succeeds = verification.
+No test targets exist in this project. Default verification after code changes is `./build_and_deploy.sh`.
+Do not default to a separate `Debug build` first unless the user explicitly asks for it or release deploy is blocked for a specific reason.
 
 ## Project Skills
 
@@ -62,6 +63,5 @@ Codex CLI → hook script (~/.Codex/hooks/) → Unix socket (/tmp/Codex-island.s
 
 - **Codex**: hooks, JSONL files, Unix socket
 - **Tmux**: send messages, focus sessions
-- **Yabai** (optional): window management
 - **Sparkle**: auto-updates
 - **Mixpanel**: anonymous analytics (app launch, session start only)

@@ -81,30 +81,6 @@ build_if_needed() {
   APP_PATH="$(find_build_artifact)"
 }
 
-resign_build_artifact() {
-  local app_path="$1"
-
-  shopt -s nullglob
-  local frameworks_dir="$app_path/Contents/Frameworks"
-  if [[ -d "$frameworks_dir" ]]; then
-    for framework in "$frameworks_dir"/*.framework; do
-      echo "Re-signing $(basename "$framework")..."
-      codesign --force --sign - "$framework"
-    done
-  fi
-  shopt -u nullglob
-
-  echo "Re-signing $APP_NAME..."
-  codesign --force --sign - --deep "$app_path"
-}
-
-resign_installed_app() {
-  local app_path="$1"
-
-  echo "Re-signing deployed app bundle..."
-  codesign --force --sign - --deep "$app_path"
-}
-
 verify_installed_app_signature() {
   local app_path="$1"
   codesign --verify --deep --strict "$app_path" >/dev/null 2>&1
@@ -162,7 +138,6 @@ if [[ -z "$APP_PATH" ]]; then
 fi
 
 echo "Using build artifact: $APP_PATH"
-resign_build_artifact "$APP_PATH"
 
 shutdown_existing_app
 
@@ -173,8 +148,8 @@ ditto "$APP_PATH" "$INSTALL_PATH"
 if verify_installed_app_signature "$INSTALL_PATH"; then
   echo "Installed app signature verified."
 else
-  echo "Installed app signature verification failed; re-signing deployed bundle..."
-  resign_installed_app "$INSTALL_PATH"
+  echo "Error: installed app signature verification failed." >&2
+  exit 1
 fi
 
 echo "Launching $APP_NAME..."

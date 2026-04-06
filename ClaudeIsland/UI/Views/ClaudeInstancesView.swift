@@ -101,14 +101,14 @@ struct ClaudeInstancesView: View {
     private func focusSession(_ session: SessionState) {
         Task {
             if let pid = session.pid {
-                _ = await YabaiController.shared.focusWindow(
+                _ = await TerminalFocusController.shared.focusWindow(
                     forClaudePid: pid,
                     workingDirectory: session.cwd,
                     windowHint: session.windowHint,
                     isInTmux: session.isInTmux
                 )
             } else {
-                _ = await YabaiController.shared.focusWindow(
+                _ = await TerminalFocusController.shared.focusWindow(
                     forWorkingDirectory: session.cwd,
                     windowHint: session.windowHint
                 )
@@ -145,14 +145,13 @@ struct InstanceRow: View {
 
     @State private var isHovered = false
     @State private var spinnerPhase = 0
-    @State private var isYabaiAvailable = false
 
     private let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
     private let spinnerSymbols = ["·", "✢", "✳", "∗", "✻", "✽"]
     private let spinnerTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
 
     private var canFocusTerminal: Bool {
-        isYabaiAvailable
+        session.pid != nil || !session.cwd.isEmpty
     }
 
     /// Whether we're showing the approval UI
@@ -249,14 +248,9 @@ struct InstanceRow: View {
 
             // Action icons or approval buttons
             if isWaitingForApproval && isInteractiveTool {
-                // Interactive tools like AskUserQuestion - show chat + terminal buttons
+                // Interactive tools like AskUserQuestion - show terminal button
                 HStack(spacing: 8) {
-                    IconButton(icon: "bubble.left") {
-                        onChat()
-                    }
-
-                    // Go to Terminal button (only if yabai available)
-                    if isYabaiAvailable {
+                    if canFocusTerminal {
                         TerminalButton(
                             isEnabled: canFocusTerminal,
                             onTap: { onFocus() }
@@ -266,18 +260,12 @@ struct InstanceRow: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             } else if isWaitingForApproval {
                 InlineApprovalButtons(
-                    onChat: onChat,
                     onApprove: onApprove,
                     onReject: onReject
                 )
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             } else {
                 HStack(spacing: 8) {
-                    // Chat icon - always show
-                    IconButton(icon: "bubble.left") {
-                        onChat()
-                    }
-
                     // Jump to terminal window (prefers Ghostty when available)
                     if canFocusTerminal {
                         IconButton(icon: "terminal") {
@@ -308,9 +296,6 @@ struct InstanceRow: View {
                 .fill(isHovered ? Color.white.opacity(0.06) : Color.clear)
         )
         .onHover { isHovered = $0 }
-        .task {
-            isYabaiAvailable = await WindowFinder.shared.isYabaiAvailable()
-        }
     }
 
     @ViewBuilder
@@ -347,23 +332,14 @@ struct InstanceRow: View {
 
 /// Compact inline approval buttons with staggered animation
 struct InlineApprovalButtons: View {
-    let onChat: () -> Void
     let onApprove: () -> Void
     let onReject: () -> Void
 
-    @State private var showChatButton = false
     @State private var showDenyButton = false
     @State private var showAllowButton = false
 
     var body: some View {
         HStack(spacing: 6) {
-            // Chat button
-            IconButton(icon: "bubble.left") {
-                onChat()
-            }
-            .opacity(showChatButton ? 1 : 0)
-            .scaleEffect(showChatButton ? 1 : 0.8)
-
             Button {
                 onReject()
             } label: {
@@ -396,12 +372,9 @@ struct InlineApprovalButtons: View {
         }
         .onAppear {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7).delay(0.0)) {
-                showChatButton = true
-            }
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7).delay(0.05)) {
                 showDenyButton = true
             }
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7).delay(0.1)) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7).delay(0.05)) {
                 showAllowButton = true
             }
         }

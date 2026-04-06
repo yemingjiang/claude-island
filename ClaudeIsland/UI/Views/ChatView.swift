@@ -447,9 +447,17 @@ struct ChatView: View {
     private func focusTerminal() {
         Task {
             if let pid = session.pid {
-                _ = await YabaiController.shared.focusWindow(forClaudePid: pid)
+                _ = await TerminalFocusController.shared.focusWindow(
+                    forClaudePid: pid,
+                    workingDirectory: session.cwd,
+                    windowHint: session.windowHint,
+                    isInTmux: session.isInTmux
+                )
             } else {
-                _ = await YabaiController.shared.focusWindow(forWorkingDirectory: session.cwd)
+                _ = await TerminalFocusController.shared.focusWindow(
+                    forWorkingDirectory: session.cwd,
+                    windowHint: session.windowHint
+                )
             }
         }
     }
