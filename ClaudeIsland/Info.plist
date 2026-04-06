@@ -12,6 +12,8 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>CFBundleShortVersionString</key>
     <string>$(MARKETING_VERSION)</string>
+    <key>MixpanelToken</key>
+    <string>$(MIXPANEL_TOKEN)</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHumanReadableCopyright</key>

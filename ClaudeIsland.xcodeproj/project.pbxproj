@@ -299,6 +299,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.2;
+				MIXPANEL_TOKEN = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.celestial.ClaudeIsland;
 				PRODUCT_NAME = "Claude Island";
 				REGISTER_APP_GROUPS = YES;
@@ -335,6 +336,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.2;
+				MIXPANEL_TOKEN = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.celestial.ClaudeIsland;
 				PRODUCT_NAME = "Claude Island";
 				REGISTER_APP_GROUPS = YES;

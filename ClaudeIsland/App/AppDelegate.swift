@@ -1,11 +1,66 @@
 import AppKit
-import IOKit
 import Mixpanel
 import os.log
 import Sparkle
 import SwiftUI
 
 private let appLogger = Logger(subsystem: "com.claudeisland", category: "AppLifecycle")
+
+enum Analytics {
+    private static let tokenInfoKey = "MixpanelToken"
+    private static let distinctIDDefaultsKey = "mixpanel_distinct_id"
+    private static var isConfigured = false
+
+    static func configure() {
+        guard let token = configuredToken else {
+            appLogger.info("Analytics disabled because Mixpanel token is not configured")
+            return
+        }
+
+        Mixpanel.initialize(token: token, trackAutomaticEvents: false)
+        Mixpanel.mainInstance().identify(distinctId: getOrCreateDistinctId())
+        isConfigured = true
+    }
+
+    static func registerSuperProperties(_ properties: [String: MixpanelType]) {
+        guard isConfigured else { return }
+        Mixpanel.mainInstance().registerSuperProperties(properties)
+    }
+
+    static func setPeopleProperties(_ properties: [String: MixpanelType]) {
+        guard isConfigured else { return }
+        Mixpanel.mainInstance().people.set(properties: properties)
+    }
+
+    static func track(_ event: String) {
+        guard isConfigured else { return }
+        Mixpanel.mainInstance().track(event: event)
+    }
+
+    static func flush() {
+        guard isConfigured else { return }
+        Mixpanel.mainInstance().flush()
+    }
+
+    private static var configuredToken: String? {
+        guard let token = Bundle.main.object(forInfoDictionaryKey: tokenInfoKey) as? String else {
+            return nil
+        }
+
+        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedToken.isEmpty ? nil : trimmedToken
+    }
+
+    private static func getOrCreateDistinctId() -> String {
+        if let existingId = UserDefaults.standard.string(forKey: distinctIDDefaultsKey) {
+            return existingId
+        }
+
+        let newId = UUID().uuidString
+        UserDefaults.standard.set(newId, forKey: distinctIDDefaultsKey)
+        return newId
+    }
+}
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowManager: WindowManager?
@@ -56,16 +111,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        Mixpanel.initialize(token: "49814c1436104ed108f3fc4735228496")
-
-        let distinctId = getOrCreateDistinctId()
-        Mixpanel.mainInstance().identify(distinctId: distinctId)
+        Analytics.configure()
 
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
         let osVersion = Foundation.ProcessInfo.processInfo.operatingSystemVersionString
 
-        Mixpanel.mainInstance().registerSuperProperties([
+        Analytics.registerSuperProperties([
             "app_version": version,
             "build_number": build,
             "macos_version": osVersion
@@ -73,14 +125,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         fetchAndRegisterClaudeVersion()
 
-        Mixpanel.mainInstance().people.set(properties: [
+        Analytics.setPeopleProperties([
             "app_version": version,
             "build_number": build,
             "macos_version": osVersion
         ])
 
-        Mixpanel.mainInstance().track(event: "App Launched")
-        Mixpanel.mainInstance().flush()
+        Analytics.track("App Launched")
+        Analytics.flush()
 
         HookInstaller.installIfNeeded()
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -144,7 +196,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         forcedTerminationWorkItem?.cancel()
         forcedTerminationWorkItem = nil
         performShutdown()
-        Mixpanel.mainInstance().flush()
+        Analytics.flush()
     }
 
     private func performShutdown() {
@@ -182,34 +234,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         forcedTerminationWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
-    }
-
-    private func getOrCreateDistinctId() -> String {
-        let key = "mixpanel_distinct_id"
-
-        if let existingId = UserDefaults.standard.string(forKey: key) {
-            return existingId
-        }
-
-        let platformExpert = IOServiceGetMatchingService(
-            kIOMainPortDefault,
-            IOServiceMatching("IOPlatformExpertDevice")
-        )
-        defer { IOObjectRelease(platformExpert) }
-
-        if let uuid = IORegistryEntryCreateCFProperty(
-            platformExpert,
-            kIOPlatformUUIDKey as CFString,
-            kCFAllocatorDefault,
-            0
-        )?.takeRetainedValue() as? String {
-            UserDefaults.standard.set(uuid, forKey: key)
-            return uuid
-        }
-
-        let newId = UUID().uuidString
-        UserDefaults.standard.set(newId, forKey: key)
-        return newId
     }
 
     private func fetchAndRegisterClaudeVersion() {
@@ -255,8 +279,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                   let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
                   let version = json["version"] as? String else { continue }
 
-            Mixpanel.mainInstance().registerSuperProperties(["claude_code_version": version])
-            Mixpanel.mainInstance().people.set(properties: ["claude_code_version": version])
+            Analytics.registerSuperProperties(["claude_code_version": version])
+            Analytics.setPeopleProperties(["claude_code_version": version])
             return
         }
     }
