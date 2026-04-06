@@ -106,6 +106,18 @@ struct NotchView: View {
         closedNotchSize.width + expansionWidth
     }
 
+    private var panelOriginX: CGFloat {
+        switch viewModel.status {
+        case .opened:
+            viewModel.geometry.openedWindowRect(for: viewModel.openedSize).minX
+        case .closed, .popping:
+            viewModel.geometry.closedWindowRect(
+                contentWidth: closedContentWidth,
+                contentHeight: closedNotchSize.height
+            ).minX
+        }
+    }
+
     // MARK: - Corner Radii
 
     private var topCornerRadius: CGFloat {
@@ -134,7 +146,7 @@ struct NotchView: View {
     // MARK: - Body
 
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack(alignment: .topLeading) {
             // Outer container does NOT receive hits - only the notch content does
             VStack(spacing: 0) {
                 notchLayout
@@ -162,8 +174,10 @@ struct NotchView: View {
                         radius: 6
                     )
                     .frame(
-                        maxWidth: viewModel.status == .opened ? notchSize.width : nil,
-                        maxHeight: viewModel.status == .opened ? notchSize.height : nil,
+                        width: viewModel.status == .opened
+                            ? notchSize.width + NotchGeometry.openedVisualWidthPadding
+                            : nil,
+                        height: viewModel.status == .opened ? notchSize.height : nil,
                         alignment: .top
                     )
                     .animation(viewModel.status == .opened ? openAnimation : closeAnimation, value: viewModel.status)
@@ -184,9 +198,10 @@ struct NotchView: View {
                         }
                     }
             }
+            .offset(x: panelOriginX)
         }
         .opacity(isVisible ? 1 : 0)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .preferredColorScheme(.dark)
         .onAppear {
             sessionMonitor.startMonitoring()

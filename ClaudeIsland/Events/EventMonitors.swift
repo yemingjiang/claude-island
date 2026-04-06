@@ -39,9 +39,13 @@ class EventMonitors {
         mouseDraggedMonitor?.start()
     }
 
-    deinit {
+    func stopAll() {
         mouseMoveMonitor?.stop()
         mouseDownMonitor?.stop()
         mouseDraggedMonitor?.stop()
+    }
+
+    deinit {
+        stopAll()
     }
 }

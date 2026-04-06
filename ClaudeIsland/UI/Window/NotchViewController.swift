@@ -44,34 +44,11 @@ class NotchViewController: NSViewController {
             let vm = self.viewModel
             let geometry = vm.geometry
 
-            // Window coordinates: origin at bottom-left, Y increases upward
-            // The window is positioned at top of screen, so panel is at top of window
-            let windowHeight = geometry.windowHeight
-
             switch vm.status {
             case .opened:
-                let panelSize = vm.openedSize
-                // Panel is centered horizontally, anchored to top
-                let panelWidth = panelSize.width + 52  // Account for corner radius padding
-                let panelHeight = panelSize.height
-                let screenWidth = geometry.screenRect.width
-                return CGRect(
-                    x: (screenWidth - panelWidth) / 2,
-                    y: windowHeight - panelHeight,
-                    width: panelWidth,
-                    height: panelHeight
-                )
+                return geometry.openedWindowRect(for: vm.openedSize)
             case .closed, .popping:
-                // When closed, use the notch rect
-                let notchRect = geometry.deviceNotchRect
-                let screenWidth = geometry.screenRect.width
-                // Add some padding for easier interaction
-                return CGRect(
-                    x: (screenWidth - notchRect.width) / 2 - 10,
-                    y: windowHeight - notchRect.height - 5,
-                    width: notchRect.width + 20,
-                    height: notchRect.height + 10
-                )
+                return geometry.notchWindowRect.insetBy(dx: -10, dy: -5)
             }
         }
 

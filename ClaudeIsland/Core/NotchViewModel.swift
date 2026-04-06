@@ -39,6 +39,8 @@ enum NotchContentType: Equatable {
 
 @MainActor
 class NotchViewModel: ObservableObject {
+    private static let menuBaseHeight: CGFloat = 460
+
     // MARK: - Published State
 
     @Published var status: NotchStatus = .closed
@@ -74,7 +76,7 @@ class NotchViewModel: ObservableObject {
             // Compact size for settings menu
             return CGSize(
                 width: min(screenRect.width * 0.4, 480),
-                height: 420 + screenSelector.expandedPickerHeight + soundSelector.expandedPickerHeight
+                height: Self.menuBaseHeight + screenSelector.expandedPickerHeight + soundSelector.expandedPickerHeight
             )
         case .instances:
             return CGSize(
@@ -181,11 +183,6 @@ class NotchViewModel: ObservableObject {
                 notchClose()
                 // Re-post the click so it reaches the window/app behind us
                 repostClickAt(location)
-            } else if geometry.notchScreenRect.contains(location) {
-                // Clicking notch while opened - only close if NOT in chat mode
-                if !isInChatMode {
-                    notchClose()
-                }
             }
         case .closed, .popping:
             if geometry.isPointInNotch(location) {

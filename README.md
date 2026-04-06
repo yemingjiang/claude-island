@@ -32,7 +32,7 @@
 Download the latest release or build from source:
 
 ```bash
-xcodebuild -scheme ClaudeIsland -configuration Release build
+./build_and_deploy.sh
 ```
 
 ## How It Works

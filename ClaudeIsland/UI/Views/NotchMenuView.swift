@@ -76,7 +76,7 @@ struct NotchMenuView: View {
                 }
             }
 
-            AccessibilityRow(isEnabled: AXIsProcessTrusted())
+            AccessibilityRow()
 
             Divider()
                 .background(Color.white.opacity(0.08))
@@ -103,7 +103,11 @@ struct NotchMenuView: View {
                 label: "Quit",
                 isDestructive: true
             ) {
-                NSApplication.shared.terminate(nil)
+                if let appDelegate = AppDelegate.shared {
+                    appDelegate.requestQuit()
+                } else {
+                    NSRunningApplication.current.forceTerminate()
+                }
             }
         }
         .padding(.horizontal, 8)
@@ -177,6 +181,7 @@ struct UpdateRow: View {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isHovered && isInteractive ? Color.white.opacity(0.08) : Color.clear)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!isInteractive)
@@ -368,16 +373,8 @@ struct UpdateRow: View {
 // MARK: - Accessibility Permission Row
 
 struct AccessibilityRow: View {
-    let isEnabled: Bool
-
     @State private var isHovered = false
-    @State private var refreshTrigger = false
-
-    private var currentlyEnabled: Bool {
-        // Re-check on each render when refreshTrigger changes
-        _ = refreshTrigger
-        return isEnabled
-    }
+    @State private var isEnabled = AXIsProcessTrusted()
 
     var body: some View {
         HStack(spacing: 10) {
@@ -422,8 +419,9 @@ struct AccessibilityRow: View {
                 .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
         )
         .onHover { isHovered = $0 }
+        .onAppear(perform: refreshPermissionStatus)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            refreshTrigger.toggle()
+            refreshPermissionStatus()
         }
     }
 
@@ -435,6 +433,10 @@ struct AccessibilityRow: View {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    private func refreshPermissionStatus() {
+        isEnabled = AXIsProcessTrusted()
     }
 }
 
@@ -466,6 +468,7 @@ struct MenuRow: View {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -515,6 +518,7 @@ struct MenuToggleRow: View {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
