@@ -29,6 +29,9 @@ actor SessionStore {
     /// Sync debounce interval (100ms)
     private let syncDebounceNs: UInt64 = 100_000_000
 
+    /// Grace period for sessions that have just gone quiet before treating them as stale.
+    private let staleSessionGraceInterval: TimeInterval = 20
+
     // MARK: - Published State (for UI)
 
     /// Publisher for session state changes (nonisolated for Combine subscription from any context)
@@ -115,6 +118,11 @@ actor SessionStore {
     // MARK: - Hook Event Processing
 
     private func processHookEvent(_ event: HookEvent) async {
+        guard shouldTrack(event) else {
+            Self.logger.debug("Ignoring invalid hook event: \(event.event, privacy: .public) for \(event.sessionId.prefix(8), privacy: .public)")
+            return
+        }
+
         let sessionId = event.sessionId
         let isNewSession = sessions[sessionId] == nil
         var session = sessions[sessionId] ?? createSession(from: event)
@@ -172,6 +180,28 @@ actor SessionStore {
         if event.shouldSyncFile {
             scheduleFileSync(sessionId: sessionId, cwd: event.cwd)
         }
+    }
+
+    private func shouldTrack(_ event: HookEvent) -> Bool {
+        if event.sessionId == "unknown" {
+            return false
+        }
+
+        let pid = event.pid ?? 0
+        let hasTTY = !(event.tty?.isEmpty ?? true)
+        let hasGhosttyContext = !(event.ghosttyWindowId?.isEmpty ?? true) || !(event.ghosttyTabId?.isEmpty ?? true)
+
+        if pid > 1 || hasTTY || hasGhosttyContext {
+            return true
+        }
+
+        return FileManager.default.fileExists(atPath: sessionFilePath(sessionId: event.sessionId, cwd: event.cwd))
+    }
+
+    private func sessionFilePath(sessionId: String, cwd: String) -> String {
+        let projectDir = cwd.replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+        return NSHomeDirectory() + "/.claude/projects/" + projectDir + "/" + sessionId + ".jsonl"
     }
 
     private func createSession(from event: HookEvent) -> SessionState {
@@ -970,8 +1000,102 @@ actor SessionStore {
     // MARK: - State Publishing
 
     private func publishState() {
+        pruneInactiveSessions()
         let sortedSessions = Array(sessions.values).sorted { $0.projectName < $1.projectName }
         sessionsSubject.send(sortedSessions)
+    }
+
+    private func pruneInactiveSessions(now: Date = Date()) {
+        guard !sessions.isEmpty else { return }
+
+        let tree = ProcessTreeBuilder.shared.buildTree()
+        let liveTTYs = Set(
+            tree.values
+                .filter(isClaudeProcess)
+                .compactMap(\.tty)
+        )
+
+        let orderedSessions = sessions.values.sorted { lhs, rhs in
+            if lhs.lastActivity != rhs.lastActivity {
+                return lhs.lastActivity > rhs.lastActivity
+            }
+            return lhs.createdAt > rhs.createdAt
+        }
+
+        var keptSessions: [String: SessionState] = [:]
+        var keptRuntimeIdentities = Set<String>()
+        var removedSessionIds: [String] = []
+
+        for session in orderedSessions {
+            guard shouldKeep(session, processTree: tree, liveTTYs: liveTTYs, now: now) else {
+                removedSessionIds.append(session.sessionId)
+                continue
+            }
+
+            if let runtimeIdentity = runtimeIdentity(for: session) {
+                guard !keptRuntimeIdentities.contains(runtimeIdentity) else {
+                    removedSessionIds.append(session.sessionId)
+                    continue
+                }
+                keptRuntimeIdentities.insert(runtimeIdentity)
+            }
+
+            keptSessions[session.sessionId] = session
+        }
+
+        guard keptSessions.count != sessions.count else { return }
+
+        sessions = keptSessions
+        for sessionId in removedSessionIds {
+            cancelPendingSync(sessionId: sessionId)
+        }
+
+        if !removedSessionIds.isEmpty {
+            Self.logger.debug("Pruned \(removedSessionIds.count) stale or duplicate sessions")
+        }
+    }
+
+    private func shouldKeep(
+        _ session: SessionState,
+        processTree: [Int: ProcessInfo],
+        liveTTYs: Set<String>,
+        now: Date
+    ) -> Bool {
+        if let pid = session.pid, pid > 1, let info = processTree[pid], isClaudeProcess(info) {
+            return true
+        }
+
+        if let tty = session.tty, !tty.isEmpty, liveTTYs.contains(tty) {
+            return true
+        }
+
+        return now.timeIntervalSince(session.lastActivity) <= staleSessionGraceInterval
+    }
+
+    private func runtimeIdentity(for session: SessionState) -> String? {
+        if let pid = session.pid, pid > 1 {
+            return "pid:\(pid)"
+        }
+
+        if let tty = session.tty, !tty.isEmpty {
+            return "tty:\(tty):\(session.cwd)"
+        }
+
+        if let ghosttyWindowId = session.ghosttyWindowId, !ghosttyWindowId.isEmpty,
+           let ghosttyTabId = session.ghosttyTabId, !ghosttyTabId.isEmpty {
+            return "ghostty:\(ghosttyWindowId):\(ghosttyTabId)"
+        }
+
+        return nil
+    }
+
+    private func isClaudeProcess(_ info: ProcessInfo) -> Bool {
+        let command = info.command.lowercased()
+        if command == "claude" {
+            return true
+        }
+
+        return URL(fileURLWithPath: info.command).lastPathComponent.lowercased() == "claude"
     }
 
     // MARK: - Queries

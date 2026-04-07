@@ -7,16 +7,15 @@
 
 import ApplicationServices
 import Combine
-import SwiftUI
 import ServiceManagement
 import Sparkle
+import SwiftUI
 
 // MARK: - NotchMenuView
 
 struct NotchMenuView: View {
     @ObservedObject var viewModel: NotchViewModel
     @ObservedObject private var updateManager = UpdateManager.shared
-    @ObservedObject private var screenSelector = ScreenSelector.shared
     @ObservedObject private var soundSelector = SoundSelector.shared
     @State private var hooksInstalled: Bool = false
     @State private var launchAtLogin: Bool = false
@@ -35,8 +34,6 @@ struct NotchMenuView: View {
                 .background(Color.white.opacity(0.08))
                 .padding(.vertical, 4)
 
-            // Appearance settings
-            ScreenPickerRow(screenSelector: screenSelector)
             SoundPickerRow(soundSelector: soundSelector)
 
             Divider()
@@ -117,7 +114,6 @@ struct NotchMenuView: View {
     private func refreshStates() {
         hooksInstalled = HookInstaller.isInstalled()
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        screenSelector.refreshScreens()
     }
 }
 

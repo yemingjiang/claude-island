@@ -139,6 +139,16 @@ def send_event(state):
         return None
 
 
+def session_file_exists(session_id, cwd):
+    """Check whether Claude has created a JSONL file for this session yet."""
+    if not session_id or session_id == "unknown" or not cwd:
+        return False
+
+    project_dir = cwd.replace("/", "-").replace(".", "-")
+    path = os.path.expanduser(f"~/.claude/projects/{project_dir}/{session_id}.jsonl")
+    return os.path.exists(path)
+
+
 def main():
     try:
         data = json.load(sys.stdin)
@@ -168,6 +178,11 @@ def main():
         "ghostty_window_id": ghostty_window_id,
         "ghostty_tab_id": ghostty_tab_id,
     }
+
+    # Some external SDK / queued runs can trigger hooks with PPID=1 before a real
+    # Claude session exists. Those events create phantom rows in the app.
+    if claude_pid <= 1 and not tty and not session_file_exists(session_id, cwd):
+        sys.exit(0)
 
     # Map events to status
     if event == "UserPromptSubmit":

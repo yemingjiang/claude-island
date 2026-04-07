@@ -63,19 +63,24 @@ enum Analytics {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    private var windowManager: WindowManager?
-    private var screenObserver: ScreenObserver?
+    private enum AutomationNotification {
+        static let name = Notification.Name("com.claudeisland.automation")
+        static let actionKey = "action"
+        static let openPanel = "open-panel"
+        static let showMenu = "show-menu"
+        static let showInstances = "show-instances"
+        static let quit = "quit"
+    }
+
+    private var menuBarController: MenuBarController?
     private var updateCheckTimer: Timer?
     private var isShuttingDown = false
     private var forcedTerminationWorkItem: DispatchWorkItem?
+    private var automationObserver: NSObjectProtocol?
 
     static var shared: AppDelegate?
     let updater: SPUUpdater
     private let userDriver: NotchUserDriver
-
-    var windowController: NotchWindowController? {
-        windowManager?.windowController
-    }
 
     override init() {
         userDriver = NotchUserDriver()
@@ -143,13 +148,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        windowManager = WindowManager()
-        appLogger.info("Creating initial notch window")
-        _ = windowManager?.setupNotchWindow()
-
-        screenObserver = ScreenObserver { [weak self] in
-            self?.handleScreenChange()
-        }
+        appLogger.info("Creating menu bar controller")
+        menuBarController = MenuBarController()
+        registerAutomationObserver()
 
         if updater.canCheckForUpdates {
             updater.checkForUpdates()
@@ -159,16 +160,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let updater = self?.updater, updater.canCheckForUpdates else { return }
             updater.checkForUpdates()
         }
-    }
-
-    private func handleScreenChange() {
-        guard !isShuttingDown else {
-            appLogger.debug("Ignoring screen change while shutting down")
-            return
-        }
-
-        appLogger.info("Handling screen change by recreating notch window")
-        _ = windowManager?.setupNotchWindow()
     }
 
     @MainActor
@@ -200,7 +191,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func performShutdown() {
-        guard isShuttingDown || windowManager != nil || screenObserver != nil || updateCheckTimer != nil else {
+        guard isShuttingDown || menuBarController != nil || updateCheckTimer != nil else {
             appLogger.debug("performShutdown ignored because shutdown already completed")
             return
         }
@@ -208,8 +199,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appLogger.info("Performing shutdown")
         updateCheckTimer?.invalidate()
         updateCheckTimer = nil
-
-        screenObserver = nil
 
         HookSocketServer.shared.stop()
 
@@ -220,8 +209,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         EventMonitors.shared.stopAll()
 
-        windowManager?.shutdown()
-        windowManager = nil
+        if let automationObserver {
+            DistributedNotificationCenter.default().removeObserver(automationObserver)
+            self.automationObserver = nil
+        }
+
+        menuBarController?.shutdown()
+        menuBarController = nil
     }
 
     private func scheduleForcedTerminationFallback() {
@@ -317,5 +311,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .path
 
         return actualPath == expectedPath
+    }
+
+    private func registerAutomationObserver() {
+        automationObserver = DistributedNotificationCenter.default().addObserver(
+            forName: AutomationNotification.name,
+            object: Bundle.main.bundleIdentifier,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleAutomationNotification(notification)
+        }
+    }
+
+    @MainActor
+    private func handleAutomationNotification(_ notification: Notification) {
+        guard let action = notification.userInfo?[AutomationNotification.actionKey] as? String else {
+            return
+        }
+
+        switch action {
+        case AutomationNotification.openPanel:
+            appLogger.info("Automation requested panel open")
+            menuBarController?.openPanelForAutomation()
+        case AutomationNotification.showMenu:
+            appLogger.info("Automation requested settings menu")
+            menuBarController?.showMenuForAutomation()
+        case AutomationNotification.showInstances:
+            appLogger.info("Automation requested instances view")
+            menuBarController?.showInstancesForAutomation()
+        case AutomationNotification.quit:
+            appLogger.info("Automation requested quit")
+            requestQuit()
+        default:
+            appLogger.warning("Ignoring unknown automation action \(action, privacy: .public)")
+        }
     }
 }

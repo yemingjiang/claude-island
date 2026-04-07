@@ -16,6 +16,7 @@ struct NotchGeometry: Sendable {
 
     /// Extra rendered width added by opened-state padding and corner treatment.
     static let openedVisualWidthPadding: CGFloat = 40
+    private static let rightMenuBarClearance: CGFloat = 112
 
     private var notchCenterX: CGFloat {
         screenRect.midX
@@ -34,7 +35,7 @@ struct NotchGeometry: Sendable {
     }
 
     private func leadingXForPanel(width: CGFloat) -> CGFloat {
-        notchTrailingX - width
+        notchTrailingX - width - Self.rightMenuBarClearance
     }
 
     private func windowRect(for screenSpaceRect: CGRect) -> CGRect {

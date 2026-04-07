@@ -33,6 +33,10 @@ class ClaudeSessionMonitor: ObservableObject {
     func startMonitoring() {
         HookSocketServer.shared.start(
             onEvent: { event in
+                guard Self.shouldTrack(event) else {
+                    return
+                }
+
                 Task {
                     await SessionStore.shared.process(.hookReceived(event))
                 }
@@ -134,6 +138,25 @@ class ClaudeSessionMonitor: ObservableObject {
         Task {
             await SessionStore.shared.process(.loadHistory(sessionId: sessionId, cwd: cwd))
         }
+    }
+
+    nonisolated private static func shouldTrack(_ event: HookEvent) -> Bool {
+        if event.sessionId == "unknown" {
+            return false
+        }
+
+        let pid = event.pid ?? 0
+        let hasTTY = !(event.tty?.isEmpty ?? true)
+        let hasGhosttyContext = !(event.ghosttyWindowId?.isEmpty ?? true) || !(event.ghosttyTabId?.isEmpty ?? true)
+
+        if pid > 1 || hasTTY || hasGhosttyContext {
+            return true
+        }
+
+        let projectDir = event.cwd.replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+        let filePath = NSHomeDirectory() + "/.claude/projects/" + projectDir + "/" + event.sessionId + ".jsonl"
+        return FileManager.default.fileExists(atPath: filePath)
     }
 }
 

@@ -19,11 +19,13 @@ Do not default to a separate `Debug build` first unless the user explicitly asks
 ## Project Skills
 
 - For automated notch/menu regression checks, use the local skill at `.codex/skills/claude-island-menu-automation/`.
-- The bundled script covers the current top-right menu toggle and `Quit` verification path against `/Applications/Claude Island.app`.
+- The bundled skill should be kept aligned with the current menu bar status-item entrypoint, not the old notch-only flow.
+- For deterministic local automation, prefer the app's distributed-notification automation hook to open the panel or switch to settings before doing AX-based button checks.
+- Contributor notes and recent debugging lessons live in `docs/development-notes.md`.
 
 ## Project Overview
 
-Codex Island is a macOS menu bar app (SwiftUI + AppKit) that displays Dynamic Island-style notifications for Codex CLI sessions. It monitors sessions in real-time, shows tool execution status in an animated notch overlay, and lets users approve/deny tool permissions directly from the notch without switching to the terminal.
+Codex Island is a macOS menu bar app (SwiftUI + AppKit) for Claude Code sessions. The primary entry point is a menu bar status item that opens a custom SwiftUI panel under the menu bar icon. It monitors sessions in real time, shows tool execution status, and lets users approve or deny tool permissions without switching to the terminal.
 
 - **Platform:** macOS 15.6+ (Sequoia), Swift 5.0
 - **UI:** SwiftUI views hosted in AppKit NSPanel (menu bar app, LSUIElement=true)
@@ -55,9 +57,10 @@ Codex CLI → hook script (~/.Codex/hooks/) → Unix socket (/tmp/Codex-island.s
 
 ### UI Structure
 
-- **NotchWindow** (NSPanel subclass): Transparent overlay on the notch, ignores mouse events by default. Global event monitors detect hover/click.
-- **NotchView**: Main SwiftUI view. Header row always visible, content area expands on hover. Content types: session list, settings menu, chat history.
-- Spring animations for expand/collapse, matched geometry effects for transitions.
+- **MenuBarController**: Owns the `NSStatusItem`, panel positioning, open/close lifecycle, and status-icon updates.
+- **MenuBarPanel**: Borderless `NSPanel` used instead of `NSPopover` so the UI can stay visually pure black without the system bubble shell.
+- **MenuBarPopoverView**: Main SwiftUI content for the opened panel. Content types: session list, settings menu, chat history.
+- The legacy notch-specific files still exist in the repo, but the current user-facing entrypoint is the menu bar icon.
 
 ### External Integrations
 

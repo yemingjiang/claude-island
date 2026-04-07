@@ -39,7 +39,7 @@ enum NotchContentType: Equatable {
 
 @MainActor
 class NotchViewModel: ObservableObject {
-    private static let menuBaseHeight: CGFloat = 460
+    private static let menuBaseHeight: CGFloat = 420
     private static let closedCapsuleHeight: CGFloat = 28
     private static let instancesPanelWidth: CGFloat = 320
     private static let emptyInstancesPanelHeight: CGFloat = 156
@@ -65,7 +65,6 @@ class NotchViewModel: ObservableObject {
 
     // MARK: - Dependencies
 
-    private let screenSelector = ScreenSelector.shared
     private let soundSelector = SoundSelector.shared
 
     // MARK: - Geometry
@@ -94,7 +93,7 @@ class NotchViewModel: ObservableObject {
             // Compact size for settings menu
             return CGSize(
                 width: min(screenRect.width * 0.34, Self.regularPanelWidth),
-                height: Self.menuBaseHeight + screenSelector.expandedPickerHeight + soundSelector.expandedPickerHeight
+                height: Self.menuBaseHeight + soundSelector.expandedPickerHeight
             )
         case .instances:
             return CGSize(
@@ -118,22 +117,26 @@ class NotchViewModel: ObservableObject {
 
     // MARK: - Initialization
 
-    init(deviceNotchRect: CGRect, screenRect: CGRect, windowHeight: CGFloat, hasPhysicalNotch: Bool) {
+    init(
+        deviceNotchRect: CGRect,
+        screenRect: CGRect,
+        windowHeight: CGFloat,
+        hasPhysicalNotch: Bool,
+        enableGlobalEventHandling: Bool = true
+    ) {
         self.geometry = NotchGeometry(
             deviceNotchRect: deviceNotchRect,
             screenRect: screenRect,
             windowHeight: windowHeight
         )
         self.hasPhysicalNotch = hasPhysicalNotch
-        setupEventHandlers()
+        if enableGlobalEventHandling {
+            setupEventHandlers()
+        }
         observeSelectors()
     }
 
     private func observeSelectors() {
-        screenSelector.$isPickerExpanded
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-
         soundSelector.$isPickerExpanded
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
@@ -327,6 +330,14 @@ class NotchViewModel: ObservableObject {
 
     func toggleMenu() {
         contentType = contentType == .menu ? .instances : .menu
+    }
+
+    func showMenu() {
+        contentType = .menu
+    }
+
+    func showInstances() {
+        contentType = .instances
     }
 
     func showChat(for session: SessionState) {

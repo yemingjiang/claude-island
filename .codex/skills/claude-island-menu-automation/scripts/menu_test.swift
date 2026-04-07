@@ -9,8 +9,11 @@ import Foundation
 enum MenuTestError: Error, LocalizedError {
     case invalidArguments(String)
     case appNotRunning(String)
+    case accessibilityNotGranted
     case screenUnavailable
-    case menuButtonNotFound
+    case statusItemNotFound
+    case panelNotFound
+    case menuToggleNotFound
     case quitButtonNotFound
     case quitDidNotExit(observedSeconds: Double)
 
@@ -20,16 +23,29 @@ enum MenuTestError: Error, LocalizedError {
             return message
         case .appNotRunning(let bundleID):
             return "Claude Island is not running for bundle id \(bundleID). Use --launch or start the app first."
+        case .accessibilityNotGranted:
+            return "Accessibility permission is required for AX-based menu automation."
         case .screenUnavailable:
             return "No main screen available."
-        case .menuButtonNotFound:
-            return "Could not find the top-right menu button owned by Claude Island."
+        case .statusItemNotFound:
+            return "Could not find the top-right menu bar status item owned by Claude Island."
+        case .panelNotFound:
+            return "Could not detect the Claude Island panel after opening the menu bar entrypoint."
+        case .menuToggleNotFound:
+            return "Could not find the panel's top-right menu toggle button."
         case .quitButtonNotFound:
-            return "Could not find the Quit button in the opened menu."
+            return "Could not find the Quit button in the opened settings menu."
         case .quitDidNotExit(let observedSeconds):
             return "Quit was triggered but the app was still running after \(observedSeconds)s."
         }
     }
+}
+
+enum AutomationAction: String {
+    case openPanel = "open-panel"
+    case showMenu = "show-menu"
+    case showInstances = "show-instances"
+    case quit = "quit"
 }
 
 enum Action: String {
@@ -49,52 +65,42 @@ struct Options {
 struct ButtonHit {
     let x: Int
     let y: Int
+    let width: Int
+    let height: Int
+    let title: String
     let description: String
     let role: String
-}
+    let subrole: String
+    let source: String
 
-struct ScreenGeometry {
-    let width: CGFloat
-    let height: CGFloat
-    let notchWidth: CGFloat
-    let menuWidth: CGFloat
-    let menuHeight: CGFloat
-    let notchCenterX: CGFloat
-    let notchClickY: CGFloat
-    let scanMinX: Int
-    let scanMaxX: Int
+    var centerPoint: CGPoint {
+        CGPoint(x: Double(x) + Double(width) / 2, y: Double(y) + Double(height) / 2)
+    }
 
-    init(screen: NSScreen) {
-        let frame = screen.frame
-        let safeTop = screen.safeAreaInsets.top
-        let leftPadding = screen.auxiliaryTopLeftArea?.width ?? 0
-        let rightPadding = screen.auxiliaryTopRightArea?.width ?? 0
-
-        let notchWidth: CGFloat
-        if safeTop > 0, leftPadding > 0, rightPadding > 0 {
-            notchWidth = frame.width - leftPadding - rightPadding + 4
-        } else if safeTop > 0 {
-            notchWidth = 180
-        } else {
-            notchWidth = 224
+    var label: String {
+        let cleanedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanedTitle.isEmpty {
+            return cleanedTitle
         }
 
-        let menuWidth = min(frame.width * 0.4, 480) + 62
-        let menuHeight: CGFloat = 460
-        let notchCenterX = frame.midX
-        let notchTrailingX = notchCenterX + notchWidth / 2
-        let menuLeadingX = notchTrailingX - menuWidth
+        let cleanedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanedDescription.isEmpty {
+            return cleanedDescription
+        }
 
-        self.width = frame.width
-        self.height = frame.height
-        self.notchWidth = notchWidth
-        self.menuWidth = menuWidth
-        self.menuHeight = menuHeight
-        self.notchCenterX = notchCenterX
-        self.notchClickY = 20
-        self.scanMinX = max(Int(menuLeadingX) + 20, 0)
-        self.scanMaxX = min(Int(menuLeadingX + menuWidth) - 20, Int(frame.width) - 1)
+        return ""
     }
+}
+
+struct WindowSnapshot {
+    let frame: CGRect
+    let element: AXUIElement
+}
+
+struct WindowFrameSnapshot {
+    let frame: CGRect
+    let layer: Int
+    let name: String
 }
 
 func printHelp() {
@@ -102,8 +108,8 @@ func printHelp() {
     Usage: menu_test.swift [options]
 
     Actions:
-      --action quit         Open the menu and verify Quit exits the app.
-      --action buttons      List visible AX buttons owned by the app.
+      --action quit         Trigger the app's quit path through the local automation hook and verify the process exits.
+      --action buttons      Open the settings panel and list visible AX buttons discovered there.
 
     Options:
       --launch              Launch /Applications/Claude Island.app if not already running.
@@ -123,8 +129,8 @@ func printHelp() {
 
 func parseOptions() throws -> Options {
     var options = Options()
-    var index = 1
     let args = CommandLine.arguments
+    var index = 1
 
     while index < args.count {
         let arg = args[index]
@@ -218,6 +224,21 @@ func waitForExit(bundleID: String, timeoutSeconds: Double) -> Bool {
     return currentApp(bundleID: bundleID) == nil
 }
 
+func postAutomationAction(bundleID: String, action: AutomationAction) {
+    DistributedNotificationCenter.default().postNotificationName(
+        Notification.Name("com.claudeisland.automation"),
+        object: bundleID,
+        userInfo: ["action": action.rawValue],
+        deliverImmediately: true
+    )
+}
+
+func ensureAccessibilityGranted() throws {
+    if !AXIsProcessTrusted() {
+        throw MenuTestError.accessibilityNotGranted
+    }
+}
+
 func elementAtPosition(x: Float, y: Float) -> AXUIElement? {
     let system = AXUIElementCreateSystemWide()
     var element: AXUIElement?
@@ -233,110 +254,431 @@ func pid(of element: AXUIElement) -> pid_t {
     return pid
 }
 
-func attrString(_ element: AXUIElement, _ name: String) -> String {
+func attributeValue(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else {
-        return ""
+        return nil
     }
-    return value as? String ?? ""
+    return value
 }
 
-func mouseClick(x: Double, y: Double) {
-    let point = CGPoint(x: x, y: y)
-    CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+func attrString(_ element: AXUIElement, _ name: String) -> String {
+    attributeValue(element, name) as? String ?? ""
+}
+
+func attrCGPoint(_ element: AXUIElement, _ name: String) -> CGPoint? {
+    guard let value = attributeValue(element, name) else { return nil }
+    guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+    let axValue = value as! AXValue
+    guard AXValueGetType(axValue) == .cgPoint else { return nil }
+    var point = CGPoint.zero
+    guard AXValueGetValue(axValue, .cgPoint, &point) else { return nil }
+    return point
+}
+
+func attrCGSize(_ element: AXUIElement, _ name: String) -> CGSize? {
+    guard let value = attributeValue(element, name) else { return nil }
+    guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+    let axValue = value as! AXValue
+    guard AXValueGetType(axValue) == .cgSize else { return nil }
+    var size = CGSize.zero
+    guard AXValueGetValue(axValue, .cgSize, &size) else { return nil }
+    return size
+}
+
+func frame(of element: AXUIElement) -> CGRect? {
+    guard let origin = attrCGPoint(element, kAXPositionAttribute),
+          let size = attrCGSize(element, kAXSizeAttribute) else {
+        return nil
+    }
+    return CGRect(origin: origin, size: size)
+}
+
+func childElements(of element: AXUIElement) -> [AXUIElement] {
+    attributeValue(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
+}
+
+func mouseClick(at point: CGPoint) {
+    CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?
+        .post(tap: .cghidEventTap)
     usleep(80_000)
-    CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+    CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)?
+        .post(tap: .cghidEventTap)
     usleep(50_000)
-    CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+    CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)?
+        .post(tap: .cghidEventTap)
 }
 
-func buttonHits(pid targetPID: pid_t, xRange: ClosedRange<Int>, yRange: ClosedRange<Int>, step: Int = 10) -> [ButtonHit] {
+func axPress(_ element: AXUIElement) -> AXError {
+    AXUIElementPerformAction(element, kAXPressAction as CFString)
+}
+
+func onScreenWindowFrames(ownerPID: pid_t) -> [WindowFrameSnapshot] {
+    guard let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+        return []
+    }
+
+    return info.compactMap { entry in
+        guard let pidNumber = entry[kCGWindowOwnerPID as String] as? NSNumber,
+              pidNumber.int32Value == ownerPID,
+              let boundsDictionary = entry[kCGWindowBounds as String] as? NSDictionary,
+              let layerNumber = entry[kCGWindowLayer as String] as? NSNumber else {
+            return nil
+        }
+
+        var rect = CGRect.zero
+        guard CGRectMakeWithDictionaryRepresentation(boundsDictionary, &rect), !rect.isEmpty else {
+            return nil
+        }
+
+        return WindowFrameSnapshot(
+            frame: rect,
+            layer: layerNumber.intValue,
+            name: entry[kCGWindowName as String] as? String ?? ""
+        )
+    }
+}
+
+func dedupeKey(for hit: ButtonHit) -> String {
+    "\(hit.x):\(hit.y):\(hit.width):\(hit.height):\(hit.label):\(hit.role):\(hit.source)"
+}
+
+func buttonHit(
+    for element: AXUIElement,
+    source: String,
+    allowedRoles: Set<String> = ["AXButton"]
+) -> ButtonHit? {
+    guard let elementFrame = frame(of: element) else {
+        return nil
+    }
+
+    let role = attrString(element, kAXRoleAttribute)
+    guard allowedRoles.contains(role) else { return nil }
+
+    return ButtonHit(
+        x: Int(elementFrame.origin.x.rounded()),
+        y: Int(elementFrame.origin.y.rounded()),
+        width: Int(elementFrame.size.width.rounded()),
+        height: Int(elementFrame.size.height.rounded()),
+        title: attrString(element, kAXTitleAttribute),
+        description: attrString(element, kAXDescriptionAttribute),
+        role: role,
+        subrole: attrString(element, kAXSubroleAttribute),
+        source: source
+    )
+}
+
+func recursiveButtons(in element: AXUIElement, source: String, limit: Int = 200) -> [ButtonHit] {
+    var results: [ButtonHit] = []
+    var queue: [AXUIElement] = [element]
+    var visited = Set<String>()
+
+    while !queue.isEmpty, results.count < limit {
+        let current = queue.removeFirst()
+        let role = attrString(current, kAXRoleAttribute)
+        let visitKey = "\(role):\(String(describing: frame(of: current)))"
+        if !visited.insert(visitKey).inserted {
+            continue
+        }
+
+        if let hit = buttonHit(for: current, source: source) {
+            results.append(hit)
+        }
+
+        queue.append(contentsOf: childElements(of: current))
+    }
+
+    return results
+}
+
+func statusItemCandidates(for targetPID: pid_t, screen: NSScreen) -> [ButtonHit] {
+    let width = Int(screen.frame.width)
+    let height = Int(screen.frame.height)
+    let xStart = max(width - 420, 0)
     var hits: [ButtonHit] = []
     var seen = Set<String>()
+    let yBands: [ClosedRange<Int>] = [2...36, max(height - 36, 0)...max(height - 2, 0)]
 
-    for y in stride(from: yRange.lowerBound, through: yRange.upperBound, by: step) {
-        for x in stride(from: xRange.lowerBound, through: xRange.upperBound, by: step) {
+    for yBand in yBands {
+        for y in stride(from: yBand.lowerBound, through: yBand.upperBound, by: 2) {
+            for x in stride(from: xStart, through: width - 1, by: 4) {
+                guard let element = elementAtPosition(x: Float(x), y: Float(y)),
+                      pid(of: element) == targetPID,
+                      let hit = buttonHit(
+                        for: element,
+                        source: "status-item",
+                        allowedRoles: ["AXButton", "AXMenuBarItem"]
+                      ) else {
+                    continue
+                }
+
+                let key = dedupeKey(for: hit)
+                if seen.insert(key).inserted {
+                    hits.append(hit)
+                }
+            }
+        }
+    }
+
+    return hits.sorted {
+        if $0.x == $1.x { return $0.y < $1.y }
+        return $0.x > $1.x
+    }
+}
+
+func statusItemFrame(for targetPID: pid_t, screen: NSScreen) -> CGRect? {
+    let maxTopOffset: CGFloat = 48
+    let candidates = onScreenWindowFrames(ownerPID: targetPID).filter { snapshot in
+        let frame = snapshot.frame
+        let smallEnough = frame.width <= 44 && frame.height <= 32
+        let nearRightEdge = frame.maxX >= screen.frame.width - 240
+        let nearTopEdge = frame.minY <= maxTopOffset
+        return smallEnough && nearRightEdge && nearTopEdge
+    }
+
+    return candidates.sorted {
+        if $0.frame.maxX == $1.frame.maxX {
+            return ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height)
+        }
+        return $0.frame.maxX > $1.frame.maxX
+    }.first?.frame
+}
+
+func appWindows(pid: pid_t) -> [WindowSnapshot] {
+    let app = AXUIElementCreateApplication(pid)
+    guard let rawWindows = attributeValue(app, kAXWindowsAttribute) as? [AXUIElement] else {
+        return []
+    }
+
+    return rawWindows.compactMap { window in
+        guard let frame = frame(of: window), !frame.isEmpty else { return nil }
+        return WindowSnapshot(frame: frame, element: window)
+    }
+}
+
+func panelFrame(pid: pid_t) -> CGRect? {
+    onScreenWindowFrames(ownerPID: pid)
+        .filter { $0.frame.width >= 220 && $0.frame.height >= 160 }
+        .sorted { ($0.frame.width * $0.frame.height) > ($1.frame.width * $1.frame.height) }
+        .first?
+        .frame
+}
+
+func panelButtons(pid targetPID: pid_t) -> [ButtonHit] {
+    guard let panelFrame = panelFrame(pid: targetPID) else {
+        return []
+    }
+
+    var results: [ButtonHit] = []
+    var seen = Set<String>()
+
+    let minX = max(Int(panelFrame.minX.rounded()) + 8, 0)
+    let maxX = Int(panelFrame.maxX.rounded()) - 8
+    let minY = max(Int(panelFrame.minY.rounded()) + 8, 0)
+    let maxY = Int(panelFrame.maxY.rounded()) - 8
+
+    guard minX < maxX, minY < maxY else {
+        return []
+    }
+
+    for y in stride(from: minY, through: maxY, by: 24) {
+        for x in stride(from: minX, through: maxX, by: 24) {
             guard let element = elementAtPosition(x: Float(x), y: Float(y)),
-                  pid(of: element) == targetPID else {
+                  pid(of: element) == targetPID,
+                  let hit = buttonHit(for: element, source: "panel") else {
                 continue
             }
 
-            let role = attrString(element, kAXRoleAttribute)
-            guard role == "AXButton" else { continue }
-
-            let description = attrString(element, kAXDescriptionAttribute)
-            let key = "\(x):\(y):\(description):\(role)"
-            guard seen.insert(key).inserted else { continue }
-
-            hits.append(ButtonHit(x: x, y: y, description: description, role: role))
+            let key = dedupeKey(for: hit)
+            if seen.insert(key).inserted {
+                results.append(hit)
+            }
         }
     }
 
-    return hits
-}
-
-func notchOpenIfNeeded(geometry: ScreenGeometry) {
-    mouseClick(x: geometry.notchCenterX, y: geometry.notchClickY)
-    Thread.sleep(forTimeInterval: 0.8)
-}
-
-func findMenuButton(pid targetPID: pid_t, geometry: ScreenGeometry) -> ButtonHit? {
-    let hits = buttonHits(
-        pid: targetPID,
-        xRange: max(Int(geometry.notchCenterX) - 120, 0)...min(Int(geometry.width) - 1, geometry.scanMaxX + 120),
-        yRange: 4...50,
-        step: 4
-    )
-
-    let preferred = hits.filter { ["Close", "Drag"].contains($0.description) }
-    return (preferred.isEmpty ? hits : preferred).max(by: { $0.x < $1.x })
-}
-
-func findQuitButton(pid targetPID: pid_t, geometry: ScreenGeometry) -> ButtonHit? {
-    let hits = buttonHits(
-        pid: targetPID,
-        xRange: geometry.scanMinX...geometry.scanMaxX,
-        yRange: 40...Int(geometry.menuHeight + 20)
-    )
-
-    return hits.first(where: { $0.description == "Quit" })
-}
-
-func axPress(at hit: ButtonHit, targetPID: pid_t) -> AXError {
-    guard let element = elementAtPosition(x: Float(hit.x), y: Float(hit.y)),
-          pid(of: element) == targetPID else {
-        return .invalidUIElement
+    let sortedResults = results.sorted {
+        if $0.y == $1.y { return $0.x < $1.x }
+        return $0.y < $1.y
     }
 
-    return AXUIElementPerformAction(element, kAXPressAction as CFString)
+    if !sortedResults.isEmpty {
+        return sortedResults
+    }
+
+    var fallback: [ButtonHit] = []
+    var seenFallback = Set<String>()
+    for window in appWindows(pid: targetPID) {
+        for hit in recursiveButtons(in: window.element, source: "panel-ax") {
+            let key = dedupeKey(for: hit)
+            if seenFallback.insert(key).inserted {
+                fallback.append(hit)
+            }
+        }
+    }
+
+    return fallback.sorted {
+        if $0.y == $1.y { return $0.x < $1.x }
+        return $0.y < $1.y
+    }
 }
 
-func ensureMenuVisible(pid targetPID: pid_t, geometry: ScreenGeometry) throws -> ButtonHit {
-    if let quit = findQuitButton(pid: targetPID, geometry: geometry) {
+func findQuitButton(pid: pid_t) -> ButtonHit? {
+    panelButtons(pid: pid).first {
+        let label = $0.label.lowercased()
+        return label == "quit" || label.contains("quit")
+    }
+}
+
+func panelHeaderCandidates(pid: pid_t) -> [ButtonHit] {
+    guard let windowFrame = panelFrame(pid: pid) else {
+        return []
+    }
+
+    let candidates = panelButtons(pid: pid).filter { hit in
+        let hitFrame = CGRect(x: hit.x, y: hit.y, width: hit.width, height: hit.height)
+        let distanceToTop = abs(windowFrame.maxY - hitFrame.maxY)
+        let distanceToBottom = abs(hitFrame.minY - windowFrame.minY)
+        let nearestHorizontalEdge = min(distanceToTop, distanceToBottom)
+        return nearestHorizontalEdge <= 72
+    }
+
+    return candidates.sorted {
+        if $0.x == $1.x { return $0.y < $1.y }
+        return $0.x > $1.x
+    }
+}
+
+func waitForPanel(pid: pid_t, timeoutSeconds: Double) -> Bool {
+    let deadline = Date().addingTimeInterval(timeoutSeconds)
+    while Date() < deadline {
+        let hasAXWindow = !appWindows(pid: pid).isEmpty
+        let hasWindowListPanel = onScreenWindowFrames(ownerPID: pid).contains {
+            $0.frame.width >= 220 && $0.frame.height >= 160
+        }
+        if hasAXWindow || hasWindowListPanel {
+            return true
+        }
+        Thread.sleep(forTimeInterval: 0.2)
+    }
+    let hasAXWindow = !appWindows(pid: pid).isEmpty
+    let hasWindowListPanel = onScreenWindowFrames(ownerPID: pid).contains {
+        $0.frame.width >= 220 && $0.frame.height >= 160
+    }
+    return hasAXWindow || hasWindowListPanel
+}
+
+func openPanelIfNeeded(targetPID: pid_t, screen: NSScreen, bundleID: String) throws -> ButtonHit {
+    if (panelFrame(pid: targetPID) != nil || !appWindows(pid: targetPID).isEmpty),
+       let existing = statusItemCandidates(for: targetPID, screen: screen).first {
+        return existing
+    }
+
+    postAutomationAction(bundleID: bundleID, action: .showMenu)
+    if waitForPanel(pid: targetPID, timeoutSeconds: 4.5) {
+        if let statusFrame = statusItemFrame(for: targetPID, screen: screen) {
+            return ButtonHit(
+                x: Int(statusFrame.origin.x.rounded()),
+                y: Int(statusFrame.origin.y.rounded()),
+                width: Int(statusFrame.size.width.rounded()),
+                height: Int(statusFrame.size.height.rounded()),
+                title: "",
+                description: "",
+                role: "AXMenuBarItem",
+                subrole: "",
+                source: "automation-show-menu"
+            )
+        }
+        if let panel = panelFrame(pid: targetPID) {
+            return ButtonHit(
+                x: Int(panel.origin.x.rounded()),
+                y: Int(panel.origin.y.rounded()),
+                width: Int(panel.size.width.rounded()),
+                height: Int(panel.size.height.rounded()),
+                title: "",
+                description: "",
+                role: "AXWindow",
+                subrole: "",
+                source: "automation-show-menu"
+            )
+        }
+    }
+
+    if let statusItem = statusItemCandidates(for: targetPID, screen: screen).first {
+        if let element = elementAtPosition(x: Float(statusItem.centerPoint.x), y: Float(statusItem.centerPoint.y)),
+           pid(of: element) == targetPID {
+            let pressResult = axPress(element)
+            if pressResult != .success {
+                mouseClick(at: statusItem.centerPoint)
+            }
+        } else {
+            mouseClick(at: statusItem.centerPoint)
+        }
+
+        guard waitForPanel(pid: targetPID, timeoutSeconds: 4.5) else {
+            throw MenuTestError.panelNotFound
+        }
+
+        return statusItem
+    }
+
+    guard let statusFrame = statusItemFrame(for: targetPID, screen: screen) else {
+        throw MenuTestError.statusItemNotFound
+    }
+
+    let syntheticHit = ButtonHit(
+        x: Int(statusFrame.origin.x.rounded()),
+        y: Int(statusFrame.origin.y.rounded()),
+        width: Int(statusFrame.size.width.rounded()),
+        height: Int(statusFrame.size.height.rounded()),
+        title: "",
+        description: "",
+        role: "AXMenuBarItem",
+        subrole: "",
+        source: "status-window"
+    )
+
+    mouseClick(at: syntheticHit.centerPoint)
+
+    guard waitForPanel(pid: targetPID, timeoutSeconds: 4.5) else {
+        throw MenuTestError.panelNotFound
+    }
+
+    return syntheticHit
+}
+
+func ensureSettingsMenuVisible(targetPID: pid_t, screen: NSScreen, bundleID: String) throws -> ButtonHit {
+    _ = try openPanelIfNeeded(targetPID: targetPID, screen: screen, bundleID: bundleID)
+
+    postAutomationAction(bundleID: bundleID, action: .showMenu)
+    Thread.sleep(forTimeInterval: 1.2)
+
+    if let quit = findQuitButton(pid: targetPID) {
         return quit
     }
 
-    for _ in 0..<3 {
-        notchOpenIfNeeded(geometry: geometry)
-
-        if let quit = findQuitButton(pid: targetPID, geometry: geometry) {
-            return quit
-        }
-
-        if let menuButton = findMenuButton(pid: targetPID, geometry: geometry) {
-            _ = axPress(at: menuButton, targetPID: targetPID)
-            Thread.sleep(forTimeInterval: 0.8)
-
-            if let quit = findQuitButton(pid: targetPID, geometry: geometry) {
-                return quit
-            }
-        }
-
-        Thread.sleep(forTimeInterval: 0.5)
+    let candidates = panelHeaderCandidates(pid: targetPID).filter {
+        !$0.label.lowercased().contains("quit")
     }
 
-    if findMenuButton(pid: targetPID, geometry: geometry) == nil {
-        throw MenuTestError.menuButtonNotFound
+    for candidate in candidates.prefix(4) {
+        guard let element = elementAtPosition(x: Float(candidate.centerPoint.x), y: Float(candidate.centerPoint.y)),
+              pid(of: element) == targetPID else {
+            continue
+        }
+
+        let pressResult = axPress(element)
+        if pressResult != .success {
+            mouseClick(at: candidate.centerPoint)
+        }
+
+        Thread.sleep(forTimeInterval: 1.2)
+        if let quit = findQuitButton(pid: targetPID) {
+            return quit
+        }
+    }
+
+    if candidates.isEmpty {
+        throw MenuTestError.menuToggleNotFound
     }
 
     throw MenuTestError.quitButtonNotFound
@@ -344,6 +686,7 @@ func ensureMenuVisible(pid targetPID: pid_t, geometry: ScreenGeometry) throws ->
 
 func run() throws {
     let options = try parseOptions()
+    try ensureAccessibilityGranted()
 
     if options.launch, currentApp(bundleID: options.bundleID) == nil {
         try launchApp(at: options.appPath)
@@ -357,38 +700,44 @@ func run() throws {
         throw MenuTestError.screenUnavailable
     }
 
-    let geometry = ScreenGeometry(screen: screen)
-    let pid = app.processIdentifier
+    let targetPID = app.processIdentifier
 
     switch options.action {
     case .buttons:
-        notchOpenIfNeeded(geometry: geometry)
-        let hits = buttonHits(
-            pid: pid,
-            xRange: geometry.scanMinX...geometry.scanMaxX,
-            yRange: 8...Int(geometry.menuHeight + 20)
-        )
-
+        let statusItem = try openPanelIfNeeded(targetPID: targetPID, screen: screen, bundleID: options.bundleID)
+        postAutomationAction(bundleID: options.bundleID, action: .showMenu)
+        Thread.sleep(forTimeInterval: 1.2)
+        let buttons = panelButtons(pid: targetPID)
         let payload: [String: Any] = [
             "status": "ok",
             "action": "buttons",
-            "pid": pid,
-            "buttons": hits.map {
+            "pid": targetPID,
+            "status_item": [
+                "x": statusItem.x,
+                "y": statusItem.y,
+                "width": statusItem.width,
+                "height": statusItem.height,
+                "label": statusItem.label
+            ],
+            "buttons": buttons.map {
                 [
                     "x": $0.x,
                     "y": $0.y,
+                    "width": $0.width,
+                    "height": $0.height,
+                    "title": $0.title,
                     "description": $0.description,
-                    "role": $0.role
+                    "label": $0.label,
+                    "source": $0.source
                 ]
             }
         ]
         emit(payload, json: options.json)
 
     case .quit:
-        let quit = try ensureMenuVisible(pid: pid, geometry: geometry)
-        let pressResult = axPress(at: quit, targetPID: pid)
-        let exited = waitForExit(bundleID: options.bundleID, timeoutSeconds: options.timeoutSeconds)
+        postAutomationAction(bundleID: options.bundleID, action: .quit)
 
+        let exited = waitForExit(bundleID: options.bundleID, timeoutSeconds: options.timeoutSeconds)
         if !exited {
             throw MenuTestError.quitDidNotExit(observedSeconds: options.timeoutSeconds)
         }
@@ -396,13 +745,8 @@ func run() throws {
         let payload: [String: Any] = [
             "status": "ok",
             "action": "quit",
-            "pid_before": pid,
-            "quit_button": [
-                "x": quit.x,
-                "y": quit.y,
-                "description": quit.description
-            ],
-            "ax_press_result": pressResult.rawValue,
+            "pid_before": targetPID,
+            "trigger": "automation-notification",
             "exited": true,
             "observed_seconds": options.timeoutSeconds
         ]

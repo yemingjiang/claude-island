@@ -141,6 +141,7 @@ struct ClaudeInstancesView: View {
             }
             .padding(.horizontal, 4)
             .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollBounceBehavior(.basedOnSize)
     }
@@ -208,6 +209,13 @@ private struct SectionHeader: View {
 private struct SessionOverviewBar: View {
     let sessions: [SessionState]
 
+    private struct Metric: Identifiable {
+        let id: String
+        let label: String
+        let value: String
+        let tint: Color
+    }
+
     private var processingCount: Int {
         sessions.filter { $0.phase == SessionPhase.processing || $0.phase == SessionPhase.compacting }.count
     }
@@ -220,14 +228,38 @@ private struct SessionOverviewBar: View {
         sessions.filter(\.isInTmux).count
     }
 
+    private var metrics: [Metric] {
+        [
+            Metric(id: "active", label: "Active", value: "\(sessions.count)", tint: .white),
+            Metric(id: "running", label: "Running", value: "\(processingCount)", tint: Color(red: 0.85, green: 0.47, blue: 0.34)),
+            Metric(id: "waiting", label: "Waiting", value: "\(waitingCount)", tint: TerminalColors.green),
+            Metric(id: "tmux", label: "tmux", value: "\(tmuxCount)", tint: Color(red: 0.45, green: 0.72, blue: 0.95))
+        ]
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
-            SummaryPill(label: "Active", value: "\(sessions.count)", tint: .white)
-            SummaryPill(label: "Running", value: "\(processingCount)", tint: Color(red: 0.85, green: 0.47, blue: 0.34))
-            SummaryPill(label: "Waiting", value: "\(waitingCount)", tint: TerminalColors.green)
-            SummaryPill(label: "tmux", value: "\(tmuxCount)", tint: Color(red: 0.45, green: 0.72, blue: 0.95))
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                ForEach(metrics) { metric in
+                    SummaryPill(label: metric.label, value: metric.value, tint: metric.tint)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    SummaryPill(label: metrics[0].label, value: metrics[0].value, tint: metrics[0].tint)
+                    SummaryPill(label: metrics[1].label, value: metrics[1].value, tint: metrics[1].tint)
+                }
+                HStack(spacing: 8) {
+                    SummaryPill(label: metrics[2].label, value: metrics[2].value, tint: metrics[2].tint)
+                    SummaryPill(label: metrics[3].label, value: metrics[3].value, tint: metrics[3].tint)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.bottom, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

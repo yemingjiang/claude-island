@@ -16,7 +16,7 @@
 
 ## Features
 
-- **Notch UI** — Animated overlay that expands from the MacBook notch
+- **Menu Bar UI** — Top-right menu bar status icon with a custom black panel
 - **Live Session Monitoring** — Track multiple Claude Code sessions in real-time
 - **Permission Approvals** — Approve or deny tool executions directly from the notch
 - **Chat History** — View full conversation history with markdown rendering
@@ -37,9 +37,13 @@ Download the latest release or build from source:
 
 ## How It Works
 
-Claude Island installs hooks into `~/.claude/hooks/` that communicate session state via a Unix socket. The app listens for events and displays them in the notch overlay.
+Claude Island installs hooks into `~/.claude/hooks/` that communicate session state via a Unix socket. The app listens for events and displays them from the menu bar status icon and its custom panel.
 
-When Claude needs permission to run a tool, the notch expands with approve/deny buttons—no need to switch to the terminal.
+When Claude needs permission to run a tool, the panel shows approve/deny controls directly from the menu bar—no need to switch to the terminal.
+
+## Development Notes
+
+Recent implementation and debugging lessons are collected in `docs/development-notes.md`.
 
 ## Analytics
 
