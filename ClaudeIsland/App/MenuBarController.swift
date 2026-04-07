@@ -151,10 +151,6 @@ final class MenuBarController: NSObject {
         for sessions: [SessionState],
         hasUnseenUpdate: Bool
     ) -> MenuBarIndicatorState {
-        if sessions.contains(where: { $0.phase.isWaitingForApproval }) {
-            return .approval
-        }
-
         if sessions.contains(where: { $0.phase == .waitingForInput }) {
             return .waiting
         }

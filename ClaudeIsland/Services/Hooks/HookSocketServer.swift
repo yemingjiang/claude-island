@@ -57,26 +57,13 @@ struct HookEvent: Codable, Sendable {
     }
 
     var sessionPhase: SessionPhase {
-        if event == "PreCompact" {
-            return .compacting
-        }
-
         switch status {
         case "waiting_for_approval":
-            // Note: Full PermissionContext is constructed by SessionStore, not here
-            // This is just for quick phase checks
-            return .waitingForApproval(PermissionContext(
-                toolUseId: toolUseId ?? "",
-                toolName: tool ?? "unknown",
-                toolInput: toolInput,
-                receivedAt: Date()
-            ))
+            return .waitingForInput
         case "waiting_for_input":
             return .waitingForInput
-        case "running_tool", "processing", "starting":
+        case "running_tool", "processing", "starting", "compacting":
             return .processing
-        case "compacting":
-            return .compacting
         default:
             return .idle
         }

@@ -23,20 +23,16 @@ struct HookInstaller {
         )
 
         if let bundled = Bundle.main.url(forResource: "claude-island-state", withExtension: "py") {
-            try? FileManager.default.removeItem(at: pythonScript)
-            try? FileManager.default.copyItem(at: bundled, to: pythonScript)
-            try? FileManager.default.setAttributes(
-                [.posixPermissions: 0o755],
-                ofItemAtPath: pythonScript.path
-            )
+            updateScriptIfNeeded(from: bundled, to: pythonScript)
         }
 
         updateSettings(at: settings)
     }
 
     private static func updateSettings(at settingsURL: URL) {
+        let existingData = try? Data(contentsOf: settingsURL)
         var json: [String: Any] = [:]
-        if let data = try? Data(contentsOf: settingsURL),
+        if let data = existingData,
            let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             json = existing
         }
@@ -44,45 +40,41 @@ struct HookInstaller {
         let python = detectPython()
         let command = "\(python) ~/.claude/hooks/claude-island-state.py"
         let hookEntry: [[String: Any]] = [["type": "command", "command": command]]
-        let hookEntryWithTimeout: [[String: Any]] = [["type": "command", "command": command, "timeout": 86400]]
         let withMatcher: [[String: Any]] = [["matcher": "*", "hooks": hookEntry]]
-        let withMatcherAndTimeout: [[String: Any]] = [["matcher": "*", "hooks": hookEntryWithTimeout]]
         let withoutMatcher: [[String: Any]] = [["hooks": hookEntry]]
-        let preCompactConfig: [[String: Any]] = [
-            ["matcher": "auto", "hooks": hookEntry],
-            ["matcher": "manual", "hooks": hookEntry]
-        ]
 
         var hooks = json["hooks"] as? [String: Any] ?? [:]
 
+        for (event, value) in hooks {
+            guard var entries = value as? [[String: Any]] else { continue }
+
+            entries.removeAll { entry in
+                guard let entryHooks = entry["hooks"] as? [[String: Any]] else { return false }
+                return entryHooks.contains { hook in
+                    let cmd = hook["command"] as? String ?? ""
+                    return cmd.contains("claude-island-state.py")
+                }
+            }
+
+            if entries.isEmpty {
+                hooks.removeValue(forKey: event)
+            } else {
+                hooks[event] = entries
+            }
+        }
+
         let hookEvents: [(String, [[String: Any]])] = [
             ("UserPromptSubmit", withoutMatcher),
-            ("PreToolUse", withMatcher),
-            ("PostToolUse", withMatcher),
-            ("PermissionRequest", withMatcherAndTimeout),
             ("Notification", withMatcher),
             ("Stop", withoutMatcher),
-            ("SubagentStop", withoutMatcher),
             ("SessionStart", withoutMatcher),
             ("SessionEnd", withoutMatcher),
-            ("PreCompact", preCompactConfig),
         ]
 
         for (event, config) in hookEvents {
             if var existingEvent = hooks[event] as? [[String: Any]] {
-                let hasOurHook = existingEvent.contains { entry in
-                    if let entryHooks = entry["hooks"] as? [[String: Any]] {
-                        return entryHooks.contains { h in
-                            let cmd = h["command"] as? String ?? ""
-                            return cmd.contains("claude-island-state.py")
-                        }
-                    }
-                    return false
-                }
-                if !hasOurHook {
-                    existingEvent.append(contentsOf: config)
-                    hooks[event] = existingEvent
-                }
+                existingEvent.append(contentsOf: config)
+                hooks[event] = existingEvent
             } else {
                 hooks[event] = config
             }
@@ -90,12 +82,12 @@ struct HookInstaller {
 
         json["hooks"] = hooks
 
-        if let data = try? JSONSerialization.data(
-            withJSONObject: json,
-            options: [.prettyPrinted, .sortedKeys]
-        ) {
-            try? data.write(to: settingsURL)
+        guard let data = canonicalJSONData(from: json) else { return }
+        if existingData == data {
+            return
         }
+
+        try? data.write(to: settingsURL)
     }
 
     /// Check if hooks are currently installed
@@ -137,8 +129,8 @@ struct HookInstaller {
 
         try? FileManager.default.removeItem(at: pythonScript)
 
-        guard let data = try? Data(contentsOf: settings),
-              var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let existingData = try? Data(contentsOf: settings),
+              var json = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any],
               var hooks = json["hooks"] as? [String: Any] else {
             return
         }
@@ -169,12 +161,30 @@ struct HookInstaller {
             json["hooks"] = hooks
         }
 
-        if let data = try? JSONSerialization.data(
-            withJSONObject: json,
-            options: [.prettyPrinted, .sortedKeys]
-        ) {
-            try? data.write(to: settings)
+        guard let data = canonicalJSONData(from: json), data != existingData else { return }
+        try? data.write(to: settings)
+    }
+
+    private static func updateScriptIfNeeded(from sourceURL: URL, to destinationURL: URL) {
+        let sourceData = try? Data(contentsOf: sourceURL)
+        let destinationData = try? Data(contentsOf: destinationURL)
+
+        if sourceData != destinationData {
+            try? FileManager.default.removeItem(at: destinationURL)
+            try? FileManager.default.copyItem(at: sourceURL, to: destinationURL)
         }
+
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: destinationURL.path
+        )
+    }
+
+    private static func canonicalJSONData(from object: [String: Any]) -> Data? {
+        try? JSONSerialization.data(
+            withJSONObject: object,
+            options: [.prettyPrinted, .sortedKeys]
+        )
     }
 
     private static func detectPython() -> String {

@@ -48,9 +48,8 @@ struct ClaudeInstancesView: View {
 
     // MARK: - Instances List
 
-    /// Priority: active (approval/processing/compacting) > waitingForInput > idle
+    /// Priority: running > waitingForInput > idle
     /// Secondary sort: by last user message date (stable - doesn't change when agent responds)
-    /// Note: approval requests stay in their date-based position to avoid layout shift
     private var sortedInstances: [SessionState] {
         sessionMonitor.instances.sorted { a, b in
             let priorityA = phasePriority(a.phase)
@@ -68,20 +67,17 @@ struct ClaudeInstancesView: View {
 
     private var notificationSessions: [SessionState] {
         sortedInstances.filter {
-            $0.phase == SessionPhase.processing ||
-            $0.phase == SessionPhase.compacting ||
-            $0.phase.isWaitingForApproval ||
-            $0.phase == SessionPhase.waitingForInput
+            $0.phase == .processing || $0.phase == .waitingForInput
         }
     }
 
     /// Lower number = higher priority
-    /// Approval requests share priority with processing to maintain stable ordering
     private func phasePriority(_ phase: SessionPhase) -> Int {
         switch phase {
-        case .waitingForApproval, .processing, .compacting: return 0
+        case .processing: return 0
         case .waitingForInput: return 1
         case .idle, .ended: return 2
+        case .waitingForApproval, .compacting: return 2
         }
     }
 
@@ -93,7 +89,7 @@ struct ClaudeInstancesView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     SectionHeader(
                         title: "Notifications",
-                        subtitle: "Sessions that are running, waiting, or need attention"
+                        subtitle: "Sessions that are running or waiting for you"
                     )
 
                     if notificationSessions.isEmpty {
@@ -216,24 +212,19 @@ private struct SessionOverviewBar: View {
         let tint: Color
     }
 
-    private var processingCount: Int {
-        sessions.filter { $0.phase == SessionPhase.processing || $0.phase == SessionPhase.compacting }.count
+    private var runningCount: Int {
+        sessions.filter { $0.phase == .processing }.count
     }
 
     private var waitingCount: Int {
-        sessions.filter { $0.phase == SessionPhase.waitingForInput || $0.phase.isWaitingForApproval }.count
-    }
-
-    private var tmuxCount: Int {
-        sessions.filter(\.isInTmux).count
+        sessions.filter { $0.phase == .waitingForInput }.count
     }
 
     private var metrics: [Metric] {
         [
-            Metric(id: "active", label: "Active", value: "\(sessions.count)", tint: .white),
-            Metric(id: "running", label: "Running", value: "\(processingCount)", tint: Color(red: 0.85, green: 0.47, blue: 0.34)),
-            Metric(id: "waiting", label: "Waiting", value: "\(waitingCount)", tint: TerminalColors.green),
-            Metric(id: "tmux", label: "tmux", value: "\(tmuxCount)", tint: Color(red: 0.45, green: 0.72, blue: 0.95))
+            Metric(id: "sessions", label: "Sessions", value: "\(sessions.count)", tint: .white),
+            Metric(id: "running", label: "Running", value: "\(runningCount)", tint: Color(red: 0.85, green: 0.47, blue: 0.34)),
+            Metric(id: "waiting", label: "Reply", value: "\(waitingCount)", tint: TerminalColors.green)
         ]
     }
 
@@ -251,10 +242,7 @@ private struct SessionOverviewBar: View {
                     SummaryPill(label: metrics[0].label, value: metrics[0].value, tint: metrics[0].tint)
                     SummaryPill(label: metrics[1].label, value: metrics[1].value, tint: metrics[1].tint)
                 }
-                HStack(spacing: 8) {
-                    SummaryPill(label: metrics[2].label, value: metrics[2].value, tint: metrics[2].tint)
-                    SummaryPill(label: metrics[3].label, value: metrics[3].value, tint: metrics[3].tint)
-                }
+                SummaryPill(label: metrics[2].label, value: metrics[2].value, tint: metrics[2].tint)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -344,17 +332,6 @@ struct InstanceRow: View {
         session.pid != nil || !session.cwd.isEmpty
     }
 
-    /// Whether we're showing the approval UI
-    private var isWaitingForApproval: Bool {
-        session.phase.isWaitingForApproval
-    }
-
-    /// Whether the pending tool requires interactive input (not just approve/deny)
-    private var isInteractiveTool: Bool {
-        guard let toolName = session.pendingToolName else { return false }
-        return toolName == "AskUserQuestion"
-    }
-
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             // State indicator on left
@@ -368,19 +345,12 @@ struct InstanceRow: View {
                     .foregroundColor(.white)
                     .lineLimit(1)
 
-                // Show tool call when waiting for approval, otherwise last activity
-                if isWaitingForApproval, let toolName = session.pendingToolName {
-                    // Show tool name in amber + input on same line
+                if session.phase == .processing, let toolName = session.lastToolName {
                     HStack(spacing: 4) {
                         Text(MCPToolFormatter.formatToolName(toolName))
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundColor(TerminalColors.amber.opacity(0.9))
-                        if isInteractiveTool {
-                            Text("Needs your input")
-                                .font(.system(size: 11))
-                                .foregroundColor(.white.opacity(0.5))
-                                .lineLimit(1)
-                        } else if let input = session.pendingToolInput {
+                            .foregroundColor(Color(red: 0.85, green: 0.47, blue: 0.34).opacity(0.9))
+                        if let input = session.lastMessage {
                             Text(input)
                                 .font(.system(size: 11))
                                 .foregroundColor(.white.opacity(0.5))
@@ -436,42 +406,20 @@ struct InstanceRow: View {
 
             Spacer(minLength: 0)
 
-            // Action icons or approval buttons
-            if isWaitingForApproval && isInteractiveTool {
-                // Interactive tools like AskUserQuestion - show terminal button
-                HStack(spacing: 8) {
-                    if canFocusTerminal {
-                        TerminalButton(
-                            isEnabled: canFocusTerminal,
-                            onTap: { onFocus() }
-                        )
+            HStack(spacing: 8) {
+                if canFocusTerminal {
+                    IconButton(icon: "terminal") {
+                        onFocus()
                     }
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.9)))
-            } else if isWaitingForApproval {
-                InlineApprovalButtons(
-                    onApprove: onApprove,
-                    onReject: onReject
-                )
-                .transition(.opacity.combined(with: .scale(scale: 0.9)))
-            } else {
-                HStack(spacing: 8) {
-                    // Jump to terminal window (prefers Ghostty when available)
-                    if canFocusTerminal {
-                        IconButton(icon: "terminal") {
-                            onFocus()
-                        }
-                    }
 
-                    // Archive button - only for idle or completed sessions
-                    if session.phase == .idle || session.phase == .waitingForInput {
-                        IconButton(icon: "archivebox") {
-                            onArchive()
-                        }
+                if session.phase == .idle || session.phase == .waitingForInput {
+                    IconButton(icon: "archivebox") {
+                        onArchive()
                     }
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.9)))
             }
+            .transition(.opacity.combined(with: .scale(scale: 0.9)))
         }
         .padding(.leading, 8)
         .padding(.trailing, 14)
@@ -480,7 +428,6 @@ struct InstanceRow: View {
         .onTapGesture(count: 2) {
             onChat()
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isWaitingForApproval)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(isHovered ? Color.white.opacity(0.06) : Color.clear)
@@ -491,17 +438,10 @@ struct InstanceRow: View {
     @ViewBuilder
     private var stateIndicator: some View {
         switch session.phase {
-        case .processing, .compacting:
+        case .processing:
             Text(spinnerSymbols[spinnerPhase % spinnerSymbols.count])
                 .font(.system(size: 12, weight: .bold))
                 .foregroundColor(claudeOrange)
-                .onReceive(spinnerTimer) { _ in
-                    spinnerPhase = (spinnerPhase + 1) % spinnerSymbols.count
-                }
-        case .waitingForApproval:
-            Text(spinnerSymbols[spinnerPhase % spinnerSymbols.count])
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(TerminalColors.amber)
                 .onReceive(spinnerTimer) { _ in
                     spinnerPhase = (spinnerPhase + 1) % spinnerSymbols.count
                 }
@@ -510,6 +450,10 @@ struct InstanceRow: View {
                 .fill(TerminalColors.green)
                 .frame(width: 6, height: 6)
         case .idle, .ended:
+            Circle()
+                .fill(Color.white.opacity(0.2))
+                .frame(width: 6, height: 6)
+        case .waitingForApproval, .compacting:
             Circle()
                 .fill(Color.white.opacity(0.2))
                 .frame(width: 6, height: 6)
@@ -531,31 +475,27 @@ private struct ActiveSessionCard: View {
     private var statusLabel: String {
         switch session.phase {
         case .processing: return "Running"
-        case .compacting: return "Compacting"
-        case .waitingForApproval: return "Approval"
         case .waitingForInput: return "Waiting"
         case .idle: return "Idle"
         case .ended: return "Ended"
+        case .waitingForApproval, .compacting: return "Idle"
         }
     }
 
     private var statusTint: Color {
         switch session.phase {
-        case .processing, .compacting:
+        case .processing:
             return Color(red: 0.85, green: 0.47, blue: 0.34)
-        case .waitingForApproval:
-            return TerminalColors.amber
         case .waitingForInput:
             return TerminalColors.green
         case .idle, .ended:
+            return .white
+        case .waitingForApproval, .compacting:
             return .white
         }
     }
 
     private var currentToolLabel: String? {
-        if let pending = session.pendingToolName {
-            return MCPToolFormatter.formatToolName(pending)
-        }
         if let lastTool = session.lastToolName, session.lastMessageRole == "tool" {
             return MCPToolFormatter.formatToolName(lastTool)
         }

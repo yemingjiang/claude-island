@@ -11,15 +11,13 @@ struct SessionPhaseHelpers {
     /// Get color for session phase
     static func phaseColor(for phase: SessionPhase) -> Color {
         switch phase {
-        case .waitingForApproval:
-            return TerminalColors.amber
         case .waitingForInput:
             return TerminalColors.green
         case .processing:
             return TerminalColors.cyan
-        case .compacting:
-            return TerminalColors.magenta
         case .idle, .ended:
+            return TerminalColors.dim
+        case .waitingForApproval, .compacting:
             return TerminalColors.dim
         }
     }
@@ -27,18 +25,16 @@ struct SessionPhaseHelpers {
     /// Get description for session phase
     static func phaseDescription(for phase: SessionPhase) -> String {
         switch phase {
-        case .waitingForApproval(let ctx):
-            return "Waiting for approval: \(ctx.toolName)"
         case .waitingForInput:
             return "Ready for input"
         case .processing:
-            return "Processing..."
-        case .compacting:
-            return "Compacting context..."
+            return "Running..."
         case .idle:
             return "Idle"
         case .ended:
             return "Ended"
+        case .waitingForApproval, .compacting:
+            return "Idle"
         }
     }
 

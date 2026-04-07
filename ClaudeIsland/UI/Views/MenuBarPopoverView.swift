@@ -14,10 +14,6 @@ struct MenuBarPopoverView: View {
 
     private let contentHorizontalPadding: CGFloat = 16
 
-    private var hasPendingPermission: Bool {
-        sessionMonitor.instances.contains(where: { $0.phase.isWaitingForApproval })
-    }
-
     private var hasWaitingForInput: Bool {
         sessionMonitor.instances.contains(where: { $0.phase == .waitingForInput })
     }
@@ -27,10 +23,6 @@ struct MenuBarPopoverView: View {
     }
 
     private var statusLabel: (text: String, color: Color)? {
-        if hasPendingPermission {
-            return ("Action needed", TerminalColors.red)
-        }
-
         if hasWaitingForInput {
             return ("Reply needed", TerminalColors.green)
         }

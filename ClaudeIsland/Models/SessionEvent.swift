@@ -129,32 +129,25 @@ struct ToolCompletionResult: Sendable {
 extension HookEvent {
     /// Determine the target session phase based on this hook event
     nonisolated func determinePhase() -> SessionPhase {
-        // PreCompact takes priority
-        if event == "PreCompact" {
-            return .compacting
+        if expectsResponse {
+            return .waitingForInput
         }
 
-        // Permission request creates waitingForApproval state
-        if expectsResponse, let tool = tool {
-            return .waitingForApproval(PermissionContext(
-                toolUseId: toolUseId ?? "",
-                toolName: tool,
-                toolInput: toolInput,
-                receivedAt: Date()
-            ))
+        if event == "PreCompact" {
+            return .processing
         }
 
         if event == "Notification" && notificationType == "idle_prompt" {
-            return .idle
+            return .waitingForInput
         }
 
         switch status {
+        case "waiting_for_approval":
+            return .waitingForInput
         case "waiting_for_input":
             return .waitingForInput
-        case "running_tool", "processing", "starting":
+        case "running_tool", "processing", "starting", "compacting":
             return .processing
-        case "compacting":
-            return .compacting
         case "ended":
             return .ended
         default:
@@ -170,7 +163,7 @@ extension HookEvent {
     /// Whether this event should trigger a file sync
     nonisolated var shouldSyncFile: Bool {
         switch event {
-        case "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop":
+        case "UserPromptSubmit", "Stop":
             return true
         default:
             return false
