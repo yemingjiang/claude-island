@@ -331,7 +331,7 @@ private struct MenuBarStatusIcon: View {
         ZStack(alignment: .topTrailing) {
             ClaudeCrabIcon(
                 size: 14,
-                color: Color(red: 0.85, green: 0.47, blue: 0.34)
+                color: crabColor
             )
             .frame(width: 20, height: 18)
 
@@ -349,6 +349,15 @@ private struct MenuBarStatusIcon: View {
         .frame(width: 20, height: 18)
     }
 
+    private var crabColor: Color {
+        switch state {
+        case .waiting, .approval:
+            return TerminalColors.red
+        case .idle, .running, .update:
+            return Color(red: 0.85, green: 0.47, blue: 0.34)
+        }
+    }
+
     private var badgeColor: Color? {
         switch state {
         case .idle:
@@ -356,7 +365,7 @@ private struct MenuBarStatusIcon: View {
         case .running:
             return TerminalColors.amber
         case .waiting:
-            return TerminalColors.green
+            return nil
         case .approval:
             return TerminalColors.red
         case .update:

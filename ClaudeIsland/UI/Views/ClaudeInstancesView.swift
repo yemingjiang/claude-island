@@ -495,13 +495,6 @@ private struct ActiveSessionCard: View {
         }
     }
 
-    private var currentToolLabel: String? {
-        if let lastTool = session.lastToolName, session.lastMessageRole == "tool" {
-            return MCPToolFormatter.formatToolName(lastTool)
-        }
-        return nil
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
@@ -516,10 +509,6 @@ private struct ActiveSessionCard: View {
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.white.opacity(0.95))
                             .lineLimit(1)
-
-                        CompactMetadataPill(label: statusLabel, tint: statusTint.opacity(0.9))
-                        CompactMetadataPill(label: session.isInTmux ? "tmux" : "plain", tint: session.isInTmux ? Color(red: 0.45, green: 0.72, blue: 0.95) : .white.opacity(0.7))
-                        CompactMetadataPill(label: SessionMetadataFormatter.runtimeString(since: session.createdAt), tint: .white.opacity(0.85))
                     }
 
                     Text(session.cwd)
@@ -527,6 +516,8 @@ private struct ActiveSessionCard: View {
                         .foregroundColor(.white.opacity(0.45))
                         .lineLimit(1)
                         .truncationMode(.middle)
+
+                    metadataRow
                 }
 
                 Spacer(minLength: 0)
@@ -535,19 +526,6 @@ private struct ActiveSessionCard: View {
                     IconButton(icon: "terminal") {
                         onFocus()
                     }
-                }
-            }
-
-            HStack(spacing: 10) {
-                SessionInfoLine(label: "Project", value: session.projectName)
-                if let pid = session.pid {
-                    SessionInfoLine(label: "PID", value: "\(pid)")
-                }
-                if let tty = session.tty, !tty.isEmpty {
-                    SessionInfoLine(label: "TTY", value: tty)
-                }
-                if let tool = currentToolLabel {
-                    SessionInfoLine(label: "Tool", value: tool)
                 }
             }
         }
@@ -563,6 +541,51 @@ private struct ActiveSessionCard: View {
         .contentShape(RoundedRectangle(cornerRadius: 16))
         .onHover { isHovered = $0 }
     }
+
+    @ViewBuilder
+    private var metadataRow: some View {
+        let primary = [
+            MetadataItem(label: statusLabel, tint: statusTint.opacity(0.9)),
+            MetadataItem(
+                label: session.isInTmux ? "tmux" : "plain",
+                tint: session.isInTmux ? Color(red: 0.45, green: 0.72, blue: 0.95) : .white.opacity(0.7)
+            )
+        ]
+        let secondary = [
+            MetadataItem(label: SessionMetadataFormatter.runtimeString(since: session.createdAt), tint: .white.opacity(0.85)),
+            session.pid.map { MetadataItem(label: "pid \($0)", tint: .white.opacity(0.65)) }
+        ].compactMap { $0 }
+
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                ForEach(primary + secondary) { item in
+                    CompactMetadataPill(label: item.label, tint: item.tint)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    ForEach(primary) { item in
+                        CompactMetadataPill(label: item.label, tint: item.tint)
+                    }
+                }
+
+                HStack(spacing: 6) {
+                    ForEach(secondary) { item in
+                        CompactMetadataPill(label: item.label, tint: item.tint)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct MetadataItem: Identifiable {
+    let id = UUID()
+    let label: String
+    let tint: Color
 }
 
 private struct CompactMetadataPill: View {
@@ -579,24 +602,6 @@ private struct CompactMetadataPill: View {
                 Capsule()
                     .fill(Color.white.opacity(0.06))
             )
-    }
-}
-
-private struct SessionInfoLine: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Text(label.uppercased())
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white.opacity(0.36))
-
-            Text(value)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundColor(.white.opacity(0.62))
-                .lineLimit(1)
-        }
     }
 }
 

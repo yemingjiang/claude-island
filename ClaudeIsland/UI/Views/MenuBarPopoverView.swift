@@ -24,7 +24,7 @@ struct MenuBarPopoverView: View {
 
     private var statusLabel: (text: String, color: Color)? {
         if hasWaitingForInput {
-            return ("Reply needed", TerminalColors.green)
+            return ("Reply needed", TerminalColors.red)
         }
 
         if isProcessing {
@@ -84,7 +84,9 @@ struct MenuBarPopoverView: View {
         HStack(spacing: 10) {
             ClaudeCrabIcon(
                 size: 16,
-                color: Color(red: 0.95, green: 0.68, blue: 0.55),
+                color: hasWaitingForInput
+                    ? TerminalColors.red
+                    : Color(red: 0.95, green: 0.68, blue: 0.55),
                 animateLegs: isProcessing
             )
             .frame(width: 24, height: 18, alignment: .leading)
